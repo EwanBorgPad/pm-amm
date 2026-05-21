@@ -756,17 +756,22 @@ mod tests {
             1.0,
             1e-8,
         );
-        assert_close("ln(2)", ln_fixed(f(2.0)).unwrap(), 0.693147180559945, 1e-10);
+        assert_close(
+            "ln(2)",
+            ln_fixed(f(2.0)).unwrap(),
+            std::f64::consts::LN_2,
+            1e-10,
+        );
         assert_close(
             "ln(0.5)",
             ln_fixed(f(0.5)).unwrap(),
-            -0.693147180559945,
+            -std::f64::consts::LN_2,
             1e-10,
         );
         assert_close(
             "ln(10)",
             ln_fixed(f(10.0)).unwrap(),
-            2.302585092994046,
+            std::f64::consts::LN_10,
             1e-8,
         );
         assert_close(
@@ -1486,7 +1491,6 @@ mod tests {
             let (x_ref, y_ref) = reserves_from_price(p, l).unwrap();
 
             // find_x_from_y: given y_ref, find x → should match x_ref
-            let x_found = find_x_from_y(y_ref, l).unwrap();
             let x_ref_f: f64 = x_ref.to_num();
             let x_found = find_x_from_y(y_ref, l).unwrap();
             let diff_x: f64 = (x_found - x_ref).to_num::<f64>().abs();

@@ -61,6 +61,11 @@ pub struct Market {
     // Initial YES price in basis points (5000 = 50%, range [100, 9900]).
     // Used at first deposit to seed reserves. 0 = legacy default (50%).
     pub initial_price_bps: u16,
+
+    // GroupMarket PDA this leg is attached to. Pubkey::default() = standalone
+    // binary market. Set by attach_leg_to_group; checked by resolve_market to
+    // force the cascade path (resolve_group_leg) on attached legs.
+    pub group: Pubkey,
 }
 
 impl Market {
@@ -90,7 +95,8 @@ impl Market {
         + 1  // bump
         + 64 // name
         + 2  // initial_price_bps
-        + 62; // padding
+        + 32 // group (Pubkey::default() = unattached)
+        + 30; // padding
 
     // --- Q64.64 helpers ---
 
@@ -160,6 +166,12 @@ impl Market {
             self.initial_price_bps as u32
         };
         I80F48::from_num(bps) / I80F48::from_num(10_000u32)
+    }
+
+    /// True iff this market is attached to a GroupMarket (cascade-resolved).
+    /// Standalone binary markets have `group == Pubkey::default()`.
+    pub fn is_attached_to_group(&self) -> bool {
+        self.group != Pubkey::default()
     }
 
     /// Return the resolved winning side, or None if not yet resolved.
@@ -343,6 +355,7 @@ mod tests {
             bump: 0,
             name: [0u8; 64],
             initial_price_bps: 0,
+            group: Pubkey::default(),
         };
 
         // Test various values round-trip through u128 storage
@@ -392,6 +405,7 @@ mod tests {
             bump: 0,
             name: [0u8; 64],
             initial_price_bps: 0,
+            group: Pubkey::default(),
         };
 
         // 0 maps to 0.5 (legacy)
@@ -538,12 +552,7 @@ mod tests {
         // Solana max account size before resize is 10240 bytes for a freshly
         // init'd account. Our GroupMarket must fit comfortably.
         const SOLANA_INIT_LIMIT: usize = 10_240;
-        assert!(
-            GroupMarket::LEN < SOLANA_INIT_LIMIT,
-            "GroupMarket::LEN={} must be < {}",
-            GroupMarket::LEN,
-            SOLANA_INIT_LIMIT
-        );
+        const _: () = assert!(GroupMarket::LEN < SOLANA_INIT_LIMIT);
     }
 
     #[test]
@@ -571,6 +580,7 @@ mod tests {
             bump: 0,
             name: [0u8; 64],
             initial_price_bps: 0,
+            group: Pubkey::default(),
         };
 
         assert_eq!(market.get_winning_side(), None);
@@ -578,5 +588,46 @@ mod tests {
         assert_eq!(market.get_winning_side(), Some(Side::Yes));
         market.set_winning_side(Side::No);
         assert_eq!(market.get_winning_side(), Some(Side::No));
+    }
+
+    #[test]
+    fn test_is_attached_to_group() {
+        let mut market = Market {
+            authority: Pubkey::default(),
+            market_id: 0,
+            collateral_mint: Pubkey::default(),
+            yes_mint: Pubkey::default(),
+            no_mint: Pubkey::default(),
+            vault: Pubkey::default(),
+            start_ts: 0,
+            end_ts: 0,
+            l_zero: 0,
+            reserve_yes: 0,
+            reserve_no: 0,
+            last_accrual_ts: 0,
+            cum_yes_per_share: 0,
+            cum_no_per_share: 0,
+            total_yes_distributed: 0,
+            total_no_distributed: 0,
+            total_lp_shares: 0,
+            resolved: false,
+            winning_side: 0,
+            bump: 0,
+            name: [0u8; 64],
+            initial_price_bps: 0,
+            group: Pubkey::default(),
+        };
+        assert!(!market.is_attached_to_group(), "default = standalone");
+
+        market.group = Pubkey::new_unique();
+        assert!(market.is_attached_to_group(), "non-default = attached");
+    }
+
+    #[test]
+    fn test_market_len_unchanged_at_443() {
+        // Account layout must stay at 443 bytes so the dataSize filter in
+        // useMarkets keeps working and the existing devnet accounts decode
+        // cleanly into the new struct (their padding maps to group=default).
+        assert_eq!(Market::LEN, 443);
     }
 }

@@ -240,6 +240,7 @@ mod tests {
             bump: 0,
             name: [0u8; 64],
             initial_price_bps: 0,
+            group: Pubkey::default(),
         };
 
         market.set_l_zero_fixed(l_zero_fixed);
@@ -326,7 +327,7 @@ mod tests {
         let dt = (end - 1) / steps;
         for i in 1..=steps {
             let now = (i * dt).min(end);
-            let result = compute_accrual(&market, now as i64).unwrap();
+            let result = compute_accrual(&market, now).unwrap();
             total_yes += result.yes_released.to_num::<f64>();
             total_no += result.no_released.to_num::<f64>();
             apply_accrual(&mut market, &result);

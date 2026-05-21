@@ -4,13 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
+import { PublicKey } from "@solana/web3.js";
 import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useProgram } from "@/hooks/use-program";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { runCreateGroup, type GroupCreateInput } from "@/lib/create-group";
+import { useMarkets } from "@/hooks/use-markets";
+import { useIncompleteUserGroups, type GroupData } from "@/hooks/use-groups";
+import { runCreateGroup, cancelGroupMarket, type GroupCreateInput } from "@/lib/create-group";
 
 const MIN_LEGS = 2;
 const MAX_LEGS = 32;
@@ -30,6 +33,30 @@ export default function CreateGroupPage() {
   const program = useProgram();
   const { publicKey } = useWallet();
   const router = useRouter();
+
+  const { data: markets } = useMarkets();
+  const incompleteGroups = useIncompleteUserGroups(publicKey?.toBase58(), markets);
+  const [cancellingId, setCancellingId] = useState<number | null>(null);
+
+  const onCancel = async (group: GroupData) => {
+    if (!program) return;
+    setCancellingId(group.groupId);
+    try {
+      await cancelGroupMarket(program, new PublicKey(group.publicKey));
+      toast.success(`Group #${group.groupId} cancelled`, {
+        description: "Attached legs can now be finalized as Side::No.",
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes("WalletSign") || msg.includes("User rejected")) {
+        toast.info("Transaction cancelled");
+      } else {
+        toast.error("Cancel failed", { description: msg.slice(0, 200) });
+      }
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   const durSecs =
     parseFloat(durationValue || "0") *
@@ -105,6 +132,14 @@ export default function CreateGroupPage() {
         >
           ← BACK TO CREATE
         </Link>
+
+        {incompleteGroups.length > 0 && (
+          <IncompleteGroupsBanner
+            groups={incompleteGroups}
+            cancellingId={cancellingId}
+            onCancel={onCancel}
+          />
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-[1fr_240px] gap-[16px]">
           <div className="border border-line p-[24px] space-y-[16px]">
@@ -250,5 +285,59 @@ export default function CreateGroupPage() {
         </div>
       </main>
     </>
+  );
+}
+
+interface IncompleteGroupsBannerProps {
+  groups: GroupData[];
+  cancellingId: number | null;
+  onCancel: (group: GroupData) => void;
+}
+
+function IncompleteGroupsBanner({ groups, cancellingId, onCancel }: IncompleteGroupsBannerProps) {
+  const now = Math.floor(Date.now() / 1000);
+  return (
+    <div className="mb-[16px] border border-no/40 bg-no/5 p-[12px] space-y-[8px]">
+      <div className="text-caption text-no">
+        {groups.length} INCOMPLETE GROUP{groups.length === 1 ? "" : "S"}
+      </div>
+      <p className="text-[11px] text-muted font-mono">
+        These groups were started but not all legs were attached. Cancel them once expired to
+        unlock the attached legs (they will resolve to Side::No via cascade).
+      </p>
+      {groups.map((g) => {
+        const expired = now >= g.endTs;
+        const canCancel = expired && cancellingId !== g.groupId;
+        return (
+          <div
+            key={g.publicKey}
+            className="flex items-center gap-[8px] text-[11px] font-mono border-t border-no/20 pt-[8px]"
+          >
+            <span className="flex-1 truncate">
+              <span className="text-text-hi">{g.name}</span>
+              <span className="text-muted">
+                {" "}
+                · {g.attachedLegCount}/{g.legCount} legs ·{" "}
+                {expired ? "expired" : `expires in ${Math.max(0, g.endTs - now)}s`}
+              </span>
+            </span>
+            <Link
+              href={`/group/${g.groupId}`}
+              className="px-[8px] py-[3px] border border-line rounded-sm hover:text-text-hi"
+            >
+              View
+            </Link>
+            <button
+              onClick={() => onCancel(g)}
+              disabled={!canCancel}
+              className="px-[8px] py-[3px] border border-no/40 rounded-sm text-no hover:bg-no/10 disabled:opacity-30 disabled:cursor-not-allowed"
+              title={expired ? "Cancel this group" : "Only cancellable past end_ts"}
+            >
+              {cancellingId === g.groupId ? "Cancelling…" : "Cancel"}
+            </button>
+          </div>
+        );
+      })}
+    </div>
   );
 }

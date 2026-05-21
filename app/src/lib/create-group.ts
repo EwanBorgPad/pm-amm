@@ -214,6 +214,25 @@ function deriveMetadataPda(mint: PublicKey): PublicKey {
 }
 
 /**
+ * Cancel an abandoned group past its end_ts. Marks it resolved with
+ * NO_WINNING_LEG so attached legs can be finalized as Side::No via
+ * `resolve_group_leg`. Authority-only on-chain.
+ */
+export async function cancelGroupMarket(
+  program: AnchorProgram,
+  groupPda: PublicKey,
+): Promise<void> {
+  await program.methods
+    .cancelGroupMarket()
+    .accounts({
+      authority: program.provider.wallet.publicKey,
+      groupMarket: groupPda,
+    })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 200_000 })])
+    .rpc();
+}
+
+/**
  * Create the user's USDC ATA if it doesn't exist yet. No-op if the account
  * is already initialized. Required before any deposit_liquidity call.
  */

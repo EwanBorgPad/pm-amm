@@ -56,4 +56,8 @@ pub enum PmAmmError {
     GroupIncomplete,
     #[msg("Leg market end_ts does not match group end_ts")]
     LegEndTsMismatch,
+    #[msg("Leg attached to a group must resolve via resolve_group_leg")]
+    LegMustCascadeResolve,
+    #[msg("Group can only be cancelled after expiration")]
+    GroupCancelTooEarly,
 }

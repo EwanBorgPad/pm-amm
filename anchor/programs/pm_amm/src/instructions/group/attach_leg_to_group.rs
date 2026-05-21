@@ -25,6 +25,7 @@ pub struct AttachLegToGroup<'info> {
     pub group_market: Box<Account<'info, GroupMarket>>,
 
     #[account(
+        mut,
         constraint = market.authority == authority.key() @ PmAmmError::Unauthorized,
         constraint = !market.resolved @ PmAmmError::MarketAlreadyResolved,
     )]
@@ -33,7 +34,7 @@ pub struct AttachLegToGroup<'info> {
 
 pub fn handler(ctx: Context<AttachLegToGroup>, leg_index: u8) -> Result<()> {
     let group = &mut ctx.accounts.group_market;
-    let market = &ctx.accounts.market;
+    let market = &mut ctx.accounts.market;
 
     require!(
         (leg_index as usize) < group.leg_count as usize,
@@ -41,6 +42,13 @@ pub fn handler(ctx: Context<AttachLegToGroup>, leg_index: u8) -> Result<()> {
     );
     require!(
         group.legs[leg_index as usize] == Pubkey::default(),
+        PmAmmError::LegAlreadyAttached
+    );
+
+    // Reject double-attachment across groups: once attached to any group,
+    // a leg cannot be reattached elsewhere.
+    require!(
+        !market.is_attached_to_group(),
         PmAmmError::LegAlreadyAttached
     );
 
@@ -55,6 +63,9 @@ pub fn handler(ctx: Context<AttachLegToGroup>, leg_index: u8) -> Result<()> {
     require!(actual.abs_diff(expected) <= 1, PmAmmError::InvalidPrice);
 
     group.legs[leg_index as usize] = market.key();
+    // Stamp the leg with the group it now belongs to. This forces resolution
+    // through the cascade path (resolve_group_leg) — see resolve_market.rs.
+    market.group = group.key();
 
     msg!(
         "Group {} leg {} attached: market={}, seed_bps={}",

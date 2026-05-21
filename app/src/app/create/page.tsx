@@ -11,7 +11,7 @@ import { useProgram } from "@/hooks/use-program";
 import { PublicKey, ComputeBudgetProgram, SystemProgram, Transaction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT, METAPLEX_PROGRAM_ID, solscanTxUrl } from "@/lib/constants";
-import { formatUsdc, expectedDailyLvr, poolValue } from "@/lib/pm-math";
+import { formatUsdc, expectedDailyLvr, poolValue, phi, phiInv } from "@/lib/pm-math";
 import { BN } from "@anchor-lang/core";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -40,12 +40,16 @@ export default function CreateMarketPage() {
   const liquidity = parseFloat(initialLiquidity) || 0;
   const liqLamports = liquidity * 1e6;
 
-  // PM-AMM math: L_0 = budget / (phi(0) * sqrt(T)), L_eff = L_0 * sqrt(T) = budget / phi(0)
-  const PHI_0 = 0.3989422804014327;
-  const lEff = liqLamports > 0 ? liqLamports / PHI_0 : 0;
-  const pv = lEff > 0 ? poolValue(0.5, lEff) : 0;
-  const dailyLvr = durSeconds > 0 && lEff > 0 ? expectedDailyLvr(0.5, lEff, durSeconds) : 0;
-  const expectedReturn = liqLamports / 2; // E[W_T] = W_0/2
+  // Mirror pm_math::suggest_l_zero_at_price: L_eff = budget / phi(Phi_inv(P)).
+  // Collapses to budget / phi(0) when seedPrice = 0.5.
+  const seedPct = Math.max(1, Math.min(99, parseFloat(initialPricePct) || 50));
+  const seedPrice = seedPct / 100;
+  const phiAtSeed = phi(phiInv(seedPrice));
+  const lEff = liqLamports > 0 && phiAtSeed > 0 ? liqLamports / phiAtSeed : 0;
+  const pv = lEff > 0 ? poolValue(seedPrice, lEff) : 0;
+  const dailyLvr =
+    durSeconds > 0 && lEff > 0 ? expectedDailyLvr(seedPrice, lEff, durSeconds) : 0;
+  const expectedReturn = liqLamports / 2; // E[W_T] = W_0/2 (paper §8)
   const expectedLoss = liqLamports - expectedReturn;
 
   const handleCreate = async () => {
@@ -89,8 +93,7 @@ export default function CreateMarketPage() {
 
       // Convert percent → basis points. Default 50% → 5000 bps.
       // The program accepts 0 (legacy 50/50) or 100..=9900 (1%..99%).
-      const pct = Math.max(1, Math.min(99, parseFloat(initialPricePct) || 50));
-      const initialPriceBps = Math.round(pct * 100);
+      const initialPriceBps = Math.round(seedPct * 100);
 
       // Build initialize_market + (optional) deposit_liquidity into a single
       // transaction so the user only sees one Phantom prompt.

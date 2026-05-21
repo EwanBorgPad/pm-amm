@@ -57,7 +57,8 @@
           "writable": true
         },
         {
-          "name": "market"
+          "name": "market",
+          "writable": true
         }
       ],
       "args": [
@@ -66,6 +67,35 @@
           "type": "u8"
         }
       ]
+    },
+    {
+      "name": "cancel_group_market",
+      "docs": [
+        "Cancel an abandoned GroupMarket past expiration. Marks it resolved with",
+        "`NO_WINNING_LEG`, so attached legs can then be finalized as `Side::No`",
+        "via `resolve_group_leg`. Authority-only."
+      ],
+      "discriminator": [
+        165,
+        237,
+        140,
+        189,
+        29,
+        120,
+        203,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "group_market",
+          "writable": true
+        }
+      ],
+      "args": []
     },
     {
       "name": "claim_lp_residuals",
@@ -1125,6 +1155,16 @@
       "code": 6025,
       "name": "LegEndTsMismatch",
       "msg": "Leg market end_ts does not match group end_ts"
+    },
+    {
+      "code": 6026,
+      "name": "LegMustCascadeResolve",
+      "msg": "Leg attached to a group must resolve via resolve_group_leg"
+    },
+    {
+      "code": 6027,
+      "name": "GroupCancelTooEarly",
+      "msg": "Group can only be cancelled after expiration"
     }
   ],
   "types": [
@@ -1376,6 +1416,10 @@
           {
             "name": "initial_price_bps",
             "type": "u16"
+          },
+          {
+            "name": "group",
+            "type": "pubkey"
           }
         ]
       }

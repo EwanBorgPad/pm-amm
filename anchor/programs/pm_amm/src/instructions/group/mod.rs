@@ -14,6 +14,7 @@
 //! follow-up that would also handle inter-tick rebalancing atomically.
 
 pub mod attach_leg_to_group;
+pub mod cancel_group_market;
 pub mod initialize_group_market;
 pub mod resolve_group;
 pub mod resolve_group_leg;
@@ -24,6 +25,8 @@ pub mod resolve_group_leg;
 // fully qualified from `lib.rs`, so the ambiguity is benign.
 #[allow(ambiguous_glob_reexports)]
 pub use attach_leg_to_group::*;
+#[allow(ambiguous_glob_reexports)]
+pub use cancel_group_market::*;
 #[allow(ambiguous_glob_reexports)]
 pub use initialize_group_market::*;
 #[allow(ambiguous_glob_reexports)]

@@ -29,10 +29,16 @@ export interface GroupData {
   /** Pubkeys of all leg slots (raw, before resolution). */
   legPubkeys: string[];
   resolved: boolean;
-  /** Index of the winning leg, or `null` if not resolved. */
+  /** Index of the winning leg, or `null` if not resolved or cancelled. */
   winningLeg: number | null;
   /** Σ p_i across attached legs. Should be ≈ 1; drift = arb opportunity. */
   sumProbabilities: number;
+  /** Number of slots in `legs` that hold a real pubkey (not Pubkey::default()). */
+  attachedLegCount: number;
+  /** True when every slot in [0..legCount) is populated. */
+  isComplete: boolean;
+  /** True for unresolved groups that are missing legs — eligible for cancel. */
+  isIncomplete: boolean;
 }
 
 /** Decode the 64-byte name array into a UTF-8 string (trailing zeros trimmed). */
@@ -112,6 +118,10 @@ function buildGroupData(acc: RawAccount, marketByPubkey: Map<string, MarketData>
   const groupId = bnToNum(g.groupId);
   const nameStr = decodeName(g.name) || `Group #${groupId}`;
 
+  const DEFAULT_PUBKEY = "11111111111111111111111111111111";
+  const attachedLegCount = legPubkeys.filter((pk) => pk !== DEFAULT_PUBKEY).length;
+  const isComplete = attachedLegCount === legCount;
+
   return {
     publicKey: acc.publicKey.toBase58(),
     groupId,
@@ -125,7 +135,22 @@ function buildGroupData(acc: RawAccount, marketByPubkey: Map<string, MarketData>
     resolved: g.resolved,
     winningLeg,
     sumProbabilities: sumP,
+    attachedLegCount,
+    isComplete,
+    isIncomplete: !g.resolved && !isComplete,
   };
+}
+
+/** Filter to groups owned by `authority` that are unresolved and missing legs. */
+export function useIncompleteUserGroups(
+  authority: string | undefined,
+  markets: MarketData[] | undefined,
+): GroupData[] {
+  const { data: groups } = useGroups(markets);
+  return useMemo(() => {
+    if (!authority || !groups) return [];
+    return groups.filter((g) => g.authority === authority && g.isIncomplete);
+  }, [authority, groups]);
 }
 
 /** Fetch a single group by groupId, with its resolved legs. */

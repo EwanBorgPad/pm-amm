@@ -72,7 +72,7 @@ describe("pm_amm", () => {
     const endTs = new anchor.BN(now + 86400 * 7);
 
     await program.methods
-      .initializeMarket(marketId, endTs)
+      .initializeMarket(marketId, endTs, "Integration test market", 0)
       .accounts({
         authority,
         market: pdas.marketPda,
@@ -544,7 +544,7 @@ describe("pm_amm", () => {
     const shortEnd = new anchor.BN(now + 3601); // 1h01m
 
     await program.methods
-      .initializeMarket(shortId, shortEnd)
+      .initializeMarket(shortId, shortEnd, "Short integration market", 0)
       .accounts({
         authority,
         market: shortPdas.marketPda,

@@ -154,4 +154,11 @@ pub mod pm_amm {
     pub fn resolve_group_leg(ctx: Context<ResolveGroupLeg>, leg_index: u8) -> Result<()> {
         instructions::group::resolve_group_leg::handler(ctx, leg_index)
     }
+
+    /// Cancel an abandoned GroupMarket past expiration. Marks it resolved with
+    /// `NO_WINNING_LEG`, so attached legs can then be finalized as `Side::No`
+    /// via `resolve_group_leg`. Authority-only.
+    pub fn cancel_group_market(ctx: Context<CancelGroupMarket>) -> Result<()> {
+        instructions::group::cancel_group_market::handler(ctx)
+    }
 }
