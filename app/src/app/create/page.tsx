@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useProgram } from "@/hooks/use-program";
-import { PublicKey, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
+import { PublicKey, ComputeBudgetProgram, SystemProgram, Transaction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT, METAPLEX_PROGRAM_ID, solscanTxUrl } from "@/lib/constants";
 import { formatUsdc, expectedDailyLvr, poolValue } from "@/lib/pm-math";
@@ -92,7 +92,9 @@ export default function CreateMarketPage() {
       const pct = Math.max(1, Math.min(99, parseFloat(initialPricePct) || 50));
       const initialPriceBps = Math.round(pct * 100);
 
-      const tx1 = await (program.methods as any)
+      // Build initialize_market + (optional) deposit_liquidity into a single
+      // transaction so the user only sees one Phantom prompt.
+      const initIx = await (program.methods as any)
         .initializeMarket(new BN(marketId), new BN(endTs), name, initialPriceBps)
         .accounts({
           authority: publicKey,
@@ -108,13 +110,12 @@ export default function CreateMarketPage() {
           tokenProgram: TOKEN_PROGRAM_ID,
           rent: new PublicKey("SysvarRent111111111111111111111111111111111"),
         })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-        .rpc();
+        .instruction();
 
-      toast.success("Market created", {
-        description: `ID: ${marketId}`,
-        action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx1), "_blank") },
-      });
+      const tx = new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        initIx,
+      );
 
       if (liquidity > 0) {
         const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
@@ -122,7 +123,7 @@ export default function CreateMarketPage() {
           [Buffer.from("lp"), marketPda.toBuffer(), publicKey.toBuffer()],
           program.programId,
         );
-        const tx2 = await (program.methods as any)
+        const depositIx = await (program.methods as any)
           .depositLiquidity(new BN(Math.floor(liqLamports)))
           .accounts({
             signer: publicKey,
@@ -134,12 +135,19 @@ export default function CreateMarketPage() {
             systemProgram: SystemProgram.programId,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
-          .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-          .rpc();
-        toast.success(`Deposited ${liquidity} USDC`, {
-          action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx2), "_blank") },
-        });
+          .instruction();
+        tx.add(depositIx);
       }
+
+      const sig = await (program.provider as any).sendAndConfirm(tx, []);
+      toast.success("Market created", {
+        description:
+          liquidity > 0 ? `ID: ${marketId} · Deposited ${liquidity} USDC` : `ID: ${marketId}`,
+        action: {
+          label: "Solscan ↗",
+          onClick: () => window.open(solscanTxUrl(sig), "_blank"),
+        },
+      });
 
       router.push(`/market/${marketId}`);
     } catch (err: unknown) {
@@ -323,18 +331,18 @@ export default function CreateMarketPage() {
             )}
 
             <div className="pt-[8px] border-t border-line">
-              <p className="text-[10px] font-mono text-muted uppercase tracking-[0.05em] mb-[4px]">
-                Multi-outcome (N-team / N-candidate)
+              <p className="text-[10px] font-mono text-muted uppercase tracking-[0.05em] mb-[8px]">
+                Multi-outcome (N teams / candidates)
               </p>
-              <p className="text-[11px] text-muted font-mono mb-[8px]">
-                Create N binary markets (this form, one per leg) seeded at 100/N% each, then wrap
-                them with a GroupMarket via{" "}
-                <code className="text-text-hi">initialize_group_market</code> +{" "}
-                <code className="text-text-hi">attach_leg_to_group</code>.
-              </p>
-              <p className="text-[10px] text-muted/60 font-mono">
-                UI-side group creation is on the roadmap; for now, see{" "}
-                <code className="text-text-hi">anchor/scripts/</code> for batch setup.
+              <Link
+                href="/create-group"
+                className="block border border-line-2 rounded-lg px-[12px] py-[10px] text-[12px] font-mono text-text-hi hover:bg-surface-2 transition-all duration-[120ms]"
+              >
+                → Create a group market (2..32 legs)
+              </Link>
+              <p className="text-[10px] text-muted/60 font-mono mt-[6px]">
+                Wraps N binary markets seeded at 100/N% each so Σ p_i = 1 at open. One form, the UI
+                orchestrates all transactions.
               </p>
             </div>
           </div>

@@ -24,3 +24,12 @@ Thumbs.db
 # Coverage
 coverage/
 .nyc_output/
+
+# Python (oracle/)
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Surfpool localnet state
+.surfpool/

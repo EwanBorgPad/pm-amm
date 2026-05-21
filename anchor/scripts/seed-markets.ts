@@ -82,9 +82,10 @@ async function main() {
 
     console.log(`--- ${m.name} (${m.durationDays}d, ${m.liquidity} USDC) ---`);
 
-    // Create market
+    // Create market — pass 0 for legacy 50/50 default (Phase 1 added the
+    // initial_price_bps param; this seed script keeps the historical behavior).
     await (program.methods as any)
-      .initializeMarket(new anchor.BN(marketId), new anchor.BN(endTs), m.name)
+      .initializeMarket(new anchor.BN(marketId), new anchor.BN(endTs), m.name, 0)
       .accounts({
         authority: wallet,
         market: marketPda,

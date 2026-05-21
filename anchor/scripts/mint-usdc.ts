@@ -22,7 +22,13 @@ import {
   getAccount,
 } from "@solana/spl-token";
 
-const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
+// Env-driven so the script works against any fork's mock USDC mint.
+// Falls back to Mattdgn's devnet mock if no env override.
+const USDC_MINT = new PublicKey(
+  process.env.NEXT_PUBLIC_USDC_MINT ||
+    process.env.USDC_MINT ||
+    "8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A",
+);
 
 async function main() {
   const provider = anchor.AnchorProvider.env();

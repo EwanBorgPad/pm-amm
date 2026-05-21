@@ -11,7 +11,7 @@ skip-lint = false
 pm_amm = "8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj"
 
 [programs.localnet]
-pm_amm = "Nyt82Pzqk3hvRJs8AHq4udenFQLAM9z99JSGh1aqhLA"
+pm_amm = "Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK"
 
 [provider]
 cluster = "localnet"

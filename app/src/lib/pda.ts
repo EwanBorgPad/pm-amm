@@ -1,5 +1,16 @@
 import { PublicKey } from "@solana/web3.js";
+import { BN } from "@anchor-lang/core";
 import { PROGRAM_ID } from "./constants";
+
+/**
+ * Encode a u64 id as a little-endian 8-byte Buffer for PDA seeds.
+ * Uses BN rather than Buffer.writeBigUInt64LE because the Buffer polyfill
+ * shipped to the browser by Next.js doesn't expose writeBigUInt64LE
+ * (it's a Node-only method).
+ */
+function u64SeedLE(id: number | bigint): Buffer {
+  return new BN(id.toString()).toArrayLike(Buffer, "le", 8);
+}
 
 export function deriveYesMint(market: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
@@ -26,10 +37,11 @@ export function deriveLpPosition(market: PublicKey, user: PublicKey): PublicKey 
   )[0];
 }
 
-export function deriveMarketPda(marketId: number): PublicKey {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64LE(BigInt(marketId));
-  return PublicKey.findProgramAddressSync([Buffer.from("market"), buf], PROGRAM_ID)[0];
+export function deriveMarketPda(marketId: number | bigint): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("market"), u64SeedLE(marketId)],
+    PROGRAM_ID,
+  )[0];
 }
 
 // ============================================================================
@@ -37,7 +49,8 @@ export function deriveMarketPda(marketId: number): PublicKey {
 // ============================================================================
 
 export function deriveGroupPda(groupId: number | bigint): PublicKey {
-  const buf = Buffer.alloc(8);
-  buf.writeBigUInt64LE(BigInt(groupId));
-  return PublicKey.findProgramAddressSync([Buffer.from("group"), buf], PROGRAM_ID)[0];
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("group"), u64SeedLE(groupId)],
+    PROGRAM_ID,
+  )[0];
 }
