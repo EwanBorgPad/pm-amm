@@ -69,9 +69,12 @@ pub fn handler(ctx: Context<DepositLiquidity>, amount: u64) -> Result<()> {
         let time_remaining = market.end_ts - now;
 
         if market.total_lp_shares == 0 {
-            let l_zero = pm_math::suggest_l_zero_for_budget(amount, time_remaining)?;
+            // Bootstrap: read the seed price stored at initialize_market.
+            // 0 maps to 0.5 (legacy) via Market::initial_price_fixed().
+            let target_price = market.initial_price_fixed();
+            let l_zero = pm_math::suggest_l_zero_at_price(amount, time_remaining, target_price)?;
             let l_eff = pm_math::l_effective(l_zero, time_remaining)?;
-            let (x, y) = pm_math::reserves_from_price(I80F48::from_num(0.5), l_eff)?;
+            let (x, y) = pm_math::reserves_from_price(target_price, l_eff)?;
 
             new_shares = amount_fixed;
             market.set_l_zero_fixed(l_zero);

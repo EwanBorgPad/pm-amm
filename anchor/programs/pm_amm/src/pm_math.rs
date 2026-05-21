@@ -617,6 +617,40 @@ pub fn suggest_l_zero_for_budget(budget_usdc: u64, duration_secs: i64) -> Result
     Ok(budget / (phi_0 * sqrt_t))
 }
 
+/// Calibrate L_0 so that pool value at `target_price` equals the budget.
+/// L_0 = budget / (phi(Phi_inv(target_price)) * sqrt(T)).
+///
+/// Generalization of [`suggest_l_zero_for_budget`] (the P=0.5 case).
+/// Derived directly from paper section 7 V(P) = L_eff * phi(Phi_inv(P)) by
+/// inverting for L_0 at any P. Same invariant; different calibration point.
+/// EXTENSION: paper calibrates at P=0.5; we expose any P in [PRICE_LOWER_BOUND,
+/// PRICE_UPPER_BOUND]. Required for multi-outcome seeding at 1/N.
+pub fn suggest_l_zero_at_price(
+    budget_usdc: u64,
+    duration_secs: i64,
+    target_price: I80F48,
+) -> Result<I80F48> {
+    if budget_usdc == 0 {
+        return err!(PmAmmError::InvalidBudget);
+    }
+    if duration_secs <= 0 {
+        return err!(PmAmmError::InvalidDuration);
+    }
+    if target_price < PRICE_LOWER_BOUND || target_price > PRICE_UPPER_BOUND {
+        return err!(PmAmmError::InvalidPrice);
+    }
+
+    let budget = I80F48::from_num(budget_usdc);
+    let sqrt_t = sqrt_fixed(I80F48::from_num(duration_secs))?;
+    let u = capital_phi_inv_fixed(target_price)?;
+    let phi_u = phi_fixed(u)?;
+
+    if phi_u == ZERO {
+        return err!(PmAmmError::MathOverflow);
+    }
+    Ok(budget / (phi_u * sqrt_t))
+}
+
 // ============================================================================
 // Tests — cross-validated against oracle/test_vectors.json (scipy)
 // ============================================================================
@@ -1287,6 +1321,55 @@ mod tests {
     // ================================================================
     // 11. suggest_l_zero — oracle cross-validation
     // ================================================================
+
+    #[test]
+    fn test_suggest_l_zero_at_price_consistency() {
+        // At target_price = 0.5, must match the existing P=0.5 fast-path.
+        let l_half = suggest_l_zero_for_budget(1000, 604800).unwrap();
+        let l_via_general = suggest_l_zero_at_price(1000, 604800, HALF).unwrap();
+        let diff: f64 = (l_half - l_via_general).to_num::<f64>().abs();
+        assert!(diff < 1e-4, "0.5 path mismatch: diff={diff:.2e}");
+    }
+
+    #[test]
+    fn test_suggest_l_zero_at_price_pool_value() {
+        // For any target_price, V(target_price) must equal the budget by construction.
+        let duration = 604800; // 7 days
+        for p in [0.0714, 0.1, 0.25, 0.5, 0.75, 0.9] {
+            let target = f(p);
+            let l_0 = suggest_l_zero_at_price(1000, duration, target).unwrap();
+            let l_eff = l_effective(l_0, duration).unwrap();
+            let v: f64 = pool_value(target, l_eff).unwrap().to_num();
+            assert!((v - 1000.0).abs() < 1.0, "V({p}) = {v:.3}, expected ~1000",);
+        }
+    }
+
+    #[test]
+    fn test_suggest_l_zero_at_price_errors() {
+        // Budget = 0
+        assert!(suggest_l_zero_at_price(0, 604800, HALF).is_err());
+        // Duration <= 0
+        assert!(suggest_l_zero_at_price(1000, 0, HALF).is_err());
+        assert!(suggest_l_zero_at_price(1000, -1, HALF).is_err());
+        // Out-of-bounds prices
+        assert!(suggest_l_zero_at_price(1000, 604800, f(0.0)).is_err());
+        assert!(suggest_l_zero_at_price(1000, 604800, f(1.0)).is_err());
+        assert!(suggest_l_zero_at_price(1000, 604800, f(0.00001)).is_err());
+        assert!(suggest_l_zero_at_price(1000, 604800, f(0.99999)).is_err());
+    }
+
+    #[test]
+    fn test_suggest_l_zero_at_one_over_n() {
+        // Multi-outcome seeding scenario: 14 legs at 1/14 each.
+        // Each leg seeded at p = 1/14 ≈ 0.0714 with $250 budget.
+        // We just verify V(1/14) ≈ 250 — the actual sum-to-1 property
+        // is a property of the composition, not of any single leg.
+        let target = I80F48::from_num(1u32) / I80F48::from_num(14u32);
+        let l_0 = suggest_l_zero_at_price(250, 86400 * 7, target).unwrap();
+        let l_eff = l_effective(l_0, 86400 * 7).unwrap();
+        let v: f64 = pool_value(target, l_eff).unwrap().to_num();
+        assert!((v - 250.0).abs() < 0.5, "V(1/14) at $250 budget = {v}");
+    }
 
     #[test]
     fn test_suggest_l_zero_oracle() {

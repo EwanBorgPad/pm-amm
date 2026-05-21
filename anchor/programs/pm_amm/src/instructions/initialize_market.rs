@@ -84,17 +84,26 @@ pub struct InitializeMarket<'info> {
 }
 
 /// Create a new prediction market with YES/NO mints and USDC vault.
+///
+/// `initial_price_bps`: YES price at first deposit, in basis points.
+///   0       = legacy default (50/50)
+///   100..=9900 = explicit seed price (1% .. 99%)
+///   any other value is rejected.
 pub fn handler(
     ctx: Context<InitializeMarket>,
     market_id: u64,
     end_ts: i64,
     name: String,
+    initial_price_bps: u16,
 ) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
     /// Minimum market duration in seconds (5 minutes).
     const MIN_DURATION_SECS: i64 = 300;
+    /// Permitted explicit initial price range (1% to 99% in basis points).
+    const MIN_INIT_PRICE_BPS: u16 = 100;
+    const MAX_INIT_PRICE_BPS: u16 = 9900;
 
     require!(
         end_ts > now + MIN_DURATION_SECS,
@@ -103,6 +112,11 @@ pub fn handler(
     require!(
         !name.is_empty() && name.len() <= 64,
         PmAmmError::InvalidName
+    );
+    require!(
+        initial_price_bps == 0
+            || (MIN_INIT_PRICE_BPS..=MAX_INIT_PRICE_BPS).contains(&initial_price_bps),
+        PmAmmError::InvalidPrice
     );
 
     let market = &mut ctx.accounts.market;
@@ -144,6 +158,9 @@ pub fn handler(
     market.winning_side = 0;
 
     market.bump = ctx.bumps.market;
+
+    // Seed price for the first liquidity deposit. 0 means "use legacy 0.5".
+    market.initial_price_bps = initial_price_bps;
 
     // Signer seeds for Market PDA (mint authority)
     let id_bytes = market_id.to_le_bytes();
