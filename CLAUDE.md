@@ -22,17 +22,43 @@ Built for the $PREDICT hackathon. Deadline: April 26, 2026.
 ## Commands
 
 ```bash
-# From root (aliases)
-pnpm run build      # Build program + IDL
-pnpm run test       # Integration tests (localnet)
-pnpm run dev        # Frontend dev server
-pnpm run deploy     # Deploy to devnet
+# From root — main aliases
+pnpm run build         # Build program + IDL (anchor build + idl build)
+pnpm run dev           # Frontend dev server (cd app && pnpm dev)
+pnpm run deploy        # Deploy .so to devnet (program ID 8V872...)
+pnpm run seed          # Seed devnet markets (scripts/seed-markets.ts)
+pnpm run musdc         # Mint mock USDC on devnet
 
-# From anchor/ (direct)
+# Tests
+pnpm run test          # Anchor integration tests on localnet (18 TS tests)
+pnpm run test:rust     # Rust unit tests only (62 tests: pm_math, accrual, state)
+pnpm run test:all      # Rust + Python (pytest oracle + properties)
+
+# Quality gates
+pnpm run lint          # Prettier check + Next.js lint
+pnpm run lint:fix      # Auto-fix
+pnpm run type-check    # Frontend TS strict typecheck (cd app && pnpm tsc --noEmit)
+
+# Direct (from anchor/)
 cd anchor && anchor build --no-idl -- --tools-version v1.52
-cd anchor && cargo test --package pm_amm
-cd anchor && cargo test --package pm_amm pm_math
+cd anchor && cargo test --package pm_amm                 # all Rust unit
+cd anchor && cargo test --package pm_amm pm_math         # one module
+cd anchor && cargo test --package pm_amm -- --nocapture  # show println!
+
+# Direct (Python oracle — no pytest dependency needed)
+cd oracle && python3 test_oracle.py        # 112 tests (scipy reference)
+cd oracle && python3 test_properties.py    # 24 tests (paper properties A-G)
 ```
+
+### Test count (must stay green)
+
+| Suite | Count | Run with |
+|---|---|---|
+| Rust unit | **62** | `pnpm run test:rust` |
+| TS integration | **18** | `pnpm run test` (localnet required) |
+| Python oracle | **112** | `python3 oracle/test_oracle.py` |
+| Python properties | **24** | `python3 oracle/test_properties.py` |
+| **Total** | **216** | `pnpm run test:all` (skips TS) |
 
 ## Architecture
 
@@ -40,7 +66,7 @@ cd anchor && cargo test --package pm_amm pm_math
 pm-amm/
   anchor/                # Anchor workspace
     programs/pm_amm/src/
-      instructions/      # 10 Anchor instructions
+      instructions/      # 11 Anchor instructions (Sprint 20: + mint_pair, swap → swap_yes_no)
       pm_math.rs         # Fixed-point math (phi, Phi, Phi_inv, reserves, swap)
       accrual.rs         # dC_t mechanism — LP residual redistribution
       state.rs           # Market, LpPosition accounts
@@ -68,11 +94,20 @@ Source of truth for ALL math. Always cross-check before implementing.
 - `E[LVR_t] = V_0 / (2T)` — constant expected LVR (section 8)
 - `E[W_T] = W_0 / 2` — terminal wealth (section 8)
 - Conservation: everything goes to LPs (YES+NO tokens) or arbitrageurs (LVR)
+- **Sprint 20 invariant**: `vault.usdc == yes_mint.supply == no_mint.supply` (fully-backed outcome tokens, Polymarket-style). Any instruction touching vault/supplies must preserve this.
 - NEVER deviate from the paper's math spec without explicit approval
+
+## Architecture (Sprint 20 — fully-backed)
+
+- `swap_yes_no` is **pure YES↔NO** on the pm-AMM curve (no vault, no mint/burn). 2 directions only.
+- USDC↔YES/NO trades are built client-side as atomic ix combos:
+  - **BUY** = `mint_pair(δ)` (USDC → δ YES + δ NO) + `swap_yes_no` (swap the unwanted side)
+  - **SELL** = `swap_yes_no` (rebalance to a pair) + `redeem_pair(δ)` (δ YES + δ NO → USDC)
+- Pool reserves live in `pool_yes`/`pool_no` ATAs owned by the Market PDA.
 
 ## Current Sprint
 
-Sprint 17 — Swap CU Optimization (`doc/sprints/sprint-17-cu-optimization.md`)
+Sprint 20 — Fully-Backed Outcome Tokens (`doc/sprints/sprint-20-fully-backed-architecture.md`) — supersedes Sprint 18. **Deployed on devnet 27 avr 2026** (slot 458322526).
 
 ## Rules
 

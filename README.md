@@ -71,7 +71,7 @@ pm-amm/
       lut.rs             # 2048-point lookup tables for on-chain perf
       state.rs           # Market, LpPosition structs
       errors.rs          # Error codes
-      instructions/      # 10 instructions
+      instructions/      # 11 instructions (fully-backed architecture, Sprint 20)
     tests/               # 18 TS integration tests
     scripts/             # Deploy + seed scripts
   app/                   # Next.js frontend
@@ -79,20 +79,27 @@ pm-amm/
   doc/                   # Paper reference, PRD, sprint definitions
 ```
 
-### 10 Instructions
+### 11 Instructions
 
 | Instruction | Who | Description |
 |---|---|---|
-| `initialize_market` | Anyone | Create market with YES/NO mints, USDC vault |
+| `initialize_market` | Anyone | Create market with YES/NO mints, USDC vault, pool ATAs |
 | `deposit_liquidity` | LP | Add USDC, get shares. Bootstraps L_0 on first deposit |
-| `swap` | Trader | 6 directions: USDC/YES/NO combinations |
+| `mint_pair` | Anyone | Burn 1 USDC → mint 1 YES + 1 NO (Sprint 20, fully-backed) |
+| `redeem_pair` | Holder | Burn 1 YES + 1 NO → 1 USDC |
+| `swap_yes_no` | Trader | Pure YES↔NO swap on the pm-AMM curve (2 directions) |
 | `withdraw_liquidity` | LP | Burn shares, receive YES+NO proportional |
 | `accrue` | Anyone | Permissionless dC_t accrual (keeper) |
 | `claim_lp_residuals` | LP | Claim accrued YES+NO tokens |
-| `redeem_pair` | Holder | Burn 1 YES + 1 NO = 1 USDC |
 | `resolve_market` | Authority | Set winning side after expiration |
 | `claim_winnings` | Holder | Burn winning tokens for 1 USDC each |
 | `suggest_l_zero` | Anyone | View: compute optimal L_0 for a budget |
+
+**USDC ↔ YES/NO trades** are built client-side as atomic instruction combos:
+- **BUY YES/NO** = `mint_pair(δ)` + `swap_yes_no` (dump the unwanted side)
+- **SELL YES/NO** = `swap_yes_no` (rebalance to a pair) + `redeem_pair(δ)`
+
+**Conservation invariant (Sprint 20)**: `vault.usdc == yes_mint.supply == no_mint.supply` at all times. Fully-backed outcome tokens, Polymarket-style — no structural rug possible.
 
 ---
 
@@ -142,14 +149,23 @@ The Anchor IDL is available at [`idl/pm_amm.json`](idl/pm_amm.json) for integrat
 
 ## Test Suite
 
-**200 tests total:**
+**216 tests total:**
 
 | Category | Count | Coverage |
 |---|---|---|
-| Rust unit tests (pm_math, accrual, state) | 52 | All math functions, Q64.64 roundtrips, accrual properties, solver precision |
-| TS integration tests | 18 | Full lifecycle: init -> deposit -> swap -> claim -> resolve |
-| Python property tests | 18 | Paradigm properties A/B/C, robustness D/E/F |
+| Rust unit tests (pm_math, accrual, state) | 62 | All math functions, Q64.64 roundtrips, accrual properties, solver precision |
+| TS integration tests | 18 | Full lifecycle: init -> deposit -> mint_pair -> swap_yes_no -> claim -> resolve |
+| Python property tests | 24 | Paradigm properties A/B/C, robustness D/E/F, initial-price G |
 | Python oracle tests | 112 | Cross-validation against scipy |
+
+Run with:
+
+```bash
+pnpm run test:rust   # Rust unit (62)
+pnpm run test        # TS integration on localnet (18)
+pnpm run test:all    # Rust + Python (skips TS)
+python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (136)
+```
 
 ---
 
@@ -183,17 +199,20 @@ The Anchor IDL is available at [`idl/pm_amm.json`](idl/pm_amm.json) for integrat
 # Install dependencies
 pnpm install
 
-# Build the program
+# Build the program (anchor build + idl build)
 pnpm run build
 
-# Run Rust unit tests (52 tests)
-cd anchor && cargo test --package pm_amm
+# Run Rust unit tests (62 tests)
+pnpm run test:rust
 
 # Run integration tests (18 tests, requires local validator)
 pnpm run test
 
-# Run Python oracle tests (130 tests)
+# Run Python oracle + property tests (136 tests)
 cd oracle && python3 test_oracle.py && python3 test_properties.py
+
+# Run everything except TS integration
+pnpm run test:all
 
 # Start the frontend
 pnpm run dev
