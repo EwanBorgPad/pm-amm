@@ -58,13 +58,28 @@
         },
         {
           "name": "yes_mint",
-          "writable": true,
           "relations": [
             "market"
           ]
         },
         {
           "name": "no_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_yes",
+          "docs": [
+            "Sprint 20: pool reserve ATAs (PDA authority)."
+          ],
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_no",
           "writable": true,
           "relations": [
             "market"
@@ -196,8 +211,10 @@
     {
       "name": "deposit_liquidity",
       "docs": [
-        "Deposit USDC as liquidity. First deposit bootstraps L_0 at 50/50 price.",
-        "Subsequent deposits scale L_0 proportionally to preserve the current price."
+        "Sprint 20: Deposit USDC liquidity with full collateral backing.",
+        "`amount` must be ≥ max(target_x, target_y) to back the pool reserves",
+        "(Polymarket-style invariant: vault.usdc == yes_supply == no_supply).",
+        "`budget_usdc` calibrates L_0 on first deposit, ignored on subsequent."
       ],
       "discriminator": [
         245,
@@ -226,6 +243,20 @@
           ]
         },
         {
+          "name": "yes_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "no_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
           "name": "vault",
           "writable": true,
           "relations": [
@@ -233,7 +264,35 @@
           ]
         },
         {
+          "name": "pool_yes",
+          "docs": [
+            "Sprint 20: pool's YES reserves ATA (Market PDA authority)."
+          ],
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_no",
+          "docs": [
+            "Sprint 20: pool's NO  reserves ATA (Market PDA authority)."
+          ],
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
           "name": "user_collateral",
+          "writable": true
+        },
+        {
+          "name": "user_yes",
+          "writable": true
+        },
+        {
+          "name": "user_no",
           "writable": true
         },
         {
@@ -271,6 +330,10 @@
       "args": [
         {
           "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "budget_usdc",
           "type": "u64"
         }
       ]
@@ -398,6 +461,61 @@
           }
         },
         {
+          "name": "pool_yes",
+          "docs": [
+            "Sprint 20: pool's YES token reserves (real backing)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  121,
+                  101,
+                  115
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "pool_no",
+          "docs": [
+            "Sprint 20: pool's NO token reserves (real backing)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  111,
+                  111,
+                  108,
+                  95,
+                  110,
+                  111
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
           "name": "yes_metadata",
           "writable": true
         },
@@ -434,6 +552,86 @@
         {
           "name": "name",
           "type": "string"
+        },
+        {
+          "name": "initial_price_bps",
+          "type": "u16"
+        }
+      ]
+    },
+    {
+      "name": "mint_pair",
+      "docs": [
+        "Sprint 20: Mint 1 YES + 1 NO from 1 USDC. Inverse of redeem_pair.",
+        "Used as the first leg of \"buy YES/NO\" trades (mint_pair → swap_yes_no)."
+      ],
+      "discriminator": [
+        19,
+        149,
+        94,
+        110,
+        181,
+        186,
+        33,
+        107
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "market"
+        },
+        {
+          "name": "collateral_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "yes_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "no_mint",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "user_collateral",
+          "writable": true
+        },
+        {
+          "name": "user_yes",
+          "writable": true
+        },
+        {
+          "name": "user_no",
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
         }
       ]
     },
@@ -582,20 +780,21 @@
       ]
     },
     {
-      "name": "swap",
+      "name": "swap_yes_no",
       "docs": [
-        "Swap between USDC, YES, and NO tokens (6 directions).",
-        "Updates reserves and enforces the pm-AMM invariant."
+        "Sprint 20: Pure YES↔NO swap on the pm-AMM curve. USDC↔YES/NO trades",
+        "are constructed client-side as atomic combos (mint_pair + swap_yes_no",
+        "for buy, swap_yes_no + redeem_pair for sell)."
       ],
       "discriminator": [
-        248,
-        198,
-        158,
-        145,
-        225,
-        117,
-        135,
-        200
+        169,
+        106,
+        120,
+        195,
+        169,
+        11,
+        252,
+        52
       ],
       "accounts": [
         {
@@ -608,35 +807,30 @@
           "writable": true
         },
         {
-          "name": "collateral_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
           "name": "yes_mint",
-          "writable": true,
           "relations": [
             "market"
           ]
         },
         {
           "name": "no_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_yes",
           "writable": true,
           "relations": [
             "market"
           ]
         },
         {
-          "name": "vault",
+          "name": "pool_no",
           "writable": true,
           "relations": [
             "market"
           ]
-        },
-        {
-          "name": "user_collateral",
-          "writable": true
         },
         {
           "name": "user_yes",
@@ -656,7 +850,7 @@
           "name": "direction",
           "type": {
             "defined": {
-              "name": "SwapDirection"
+              "name": "YesNoDirection"
             }
           }
         },
@@ -704,13 +898,28 @@
         },
         {
           "name": "yes_mint",
-          "writable": true,
           "relations": [
             "market"
           ]
         },
         {
           "name": "no_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_yes",
+          "docs": [
+            "Sprint 20: pool reserve ATAs (PDA authority)"
+          ],
+          "writable": true,
+          "relations": [
+            "market"
+          ]
+        },
+        {
+          "name": "pool_no",
           "writable": true,
           "relations": [
             "market"
@@ -888,6 +1097,16 @@
       "code": 6016,
       "name": "InvalidName",
       "msg": "Invalid name: must be 1-64 bytes"
+    },
+    {
+      "code": 6017,
+      "name": "InvalidInitialPrice",
+      "msg": "Initial price must be between 0.01 and 0.99 (100 to 9900 bps)"
+    },
+    {
+      "code": 6018,
+      "name": "InsufficientCollateral",
+      "msg": "Insufficient collateral: deposit must be ≥ max(x*, y*) to fully back pool reserves"
     }
   ],
   "types": [
@@ -989,6 +1208,14 @@
             "type": "pubkey"
           },
           {
+            "name": "pool_yes",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool_no",
+            "type": "pubkey"
+          },
+          {
             "name": "start_ts",
             "type": "i64"
           },
@@ -1052,6 +1279,10 @@
                 64
               ]
             }
+          },
+          {
+            "name": "initial_price",
+            "type": "u128"
           }
         ]
       }
@@ -1071,25 +1302,14 @@
       }
     },
     {
-      "name": "SwapDirection",
+      "name": "YesNoDirection",
       "docs": [
-        "Direction of a swap. Six combinations covering all USDC/YES/NO pairs."
+        "Direction of a YES↔NO swap on the pool. Sprint 20 collapses the 6 old",
+        "directions into 2 — USDC legs are now explicit via mint_pair / redeem_pair."
       ],
       "type": {
         "kind": "enum",
         "variants": [
-          {
-            "name": "UsdcToYes"
-          },
-          {
-            "name": "UsdcToNo"
-          },
-          {
-            "name": "YesToUsdc"
-          },
-          {
-            "name": "NoToUsdc"
-          },
           {
             "name": "YesToNo"
           },
