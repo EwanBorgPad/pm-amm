@@ -56,6 +56,21 @@ pub struct WithdrawLiquidity<'info> {
 }
 
 /// Burn LP shares, receive proportional YES+NO tokens.
+///
+/// Rejects post-resolution: after `resolve_market`, all dC_t-released YES+NO
+/// have already been earmarked to LPs via the per-share accumulators, and the
+/// vault holds exactly enough USDC to pay every outstanding winning token
+/// (paper-conservation invariant). Re-running withdraw at that point would
+/// mint fresh YES+NO out of zero reserves (no-op for the curve part) AND
+/// auto-claim residuals — but the residual path is better served by the
+/// dedicated `claim_lp_residuals` instruction, which keeps the LpPosition
+/// open for further claims (e.g. dust drips across multiple txs) and avoids
+/// the corner case where a LP withdraws after resolution and the math
+/// invariant has drifted by a few lamports under repeated I80F48 truncation.
+///
+/// Post-resolution LP recovery path is:
+///   1. `claim_lp_residuals` — mint the pending YES+NO from `cum_per_share`.
+///   2. `claim_winnings` on each side held — burn winning tokens for 1 USDC.
 pub fn handler(ctx: Context<WithdrawLiquidity>, shares_to_burn: u128) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
@@ -68,6 +83,8 @@ pub fn handler(ctx: Context<WithdrawLiquidity>, shares_to_burn: u128) -> Result<
     {
         let market = &mut ctx.accounts.market;
         let lp = &mut ctx.accounts.lp_position;
+
+        require!(!market.resolved, PmAmmError::MarketAlreadyResolved);
 
         accrual::accrue_first(market, now)?;
 
