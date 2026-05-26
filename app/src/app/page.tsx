@@ -57,7 +57,11 @@ export default function Home() {
 
   const filters: { key: Filter; label: string; count?: number }[] = [
     { key: "all", label: "All", count: markets?.length },
-    { key: "active", label: "Active", count: markets?.filter((m) => !m.resolved && m.endTs > Math.floor(Date.now() / 1000)).length },
+    {
+      key: "active",
+      label: "Active",
+      count: markets?.filter((m) => !m.resolved && m.endTs > Math.floor(Date.now() / 1000)).length,
+    },
     { key: "expiring", label: "<24h" },
     { key: "resolved", label: "Resolved", count: markets?.filter((m) => m.resolved).length },
     { key: "positions", label: "My bets", count: positionCount || undefined },
@@ -127,9 +131,15 @@ export default function Home() {
           {isLoading && (
             <div className="flex-1 min-w-0 flex flex-col">
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="grid gap-[12px] px-[24px] py-[12px] border-b border-line grid-cols-[1fr_60px_160px_80px_72px_60px]">
+                <div
+                  key={i}
+                  className="grid gap-[12px] px-[24px] py-[12px] border-b border-line grid-cols-[1fr_60px_160px_80px_72px_60px]"
+                >
                   {Array.from({ length: 6 }).map((_, j) => (
-                    <div key={j} className="h-[14px] animate-pulse rounded-sm bg-surface border border-line" />
+                    <div
+                      key={j}
+                      className="h-[14px] animate-pulse rounded-sm bg-surface border border-line"
+                    />
                   ))}
                 </div>
               ))}
@@ -143,7 +153,12 @@ export default function Home() {
           )}
 
           {filtered.length > 0 && (
-            <MarketTable markets={filtered} selectedId={selectedId} onSelect={setSelectedId} priceHistories={priceHistories} />
+            <MarketTable
+              markets={filtered}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              priceHistories={priceHistories}
+            />
           )}
 
           {!isLoading && !error && filtered.length === 0 && (
@@ -160,11 +175,7 @@ export default function Home() {
           )}
         </main>
 
-        {selectedMarket ? (
-          <MarketDetailPanel market={selectedMarket} />
-        ) : (
-          <PortfolioPanel />
-        )}
+        {selectedMarket ? <MarketDetailPanel market={selectedMarket} /> : <PortfolioPanel />}
       </div>
     </>
   );

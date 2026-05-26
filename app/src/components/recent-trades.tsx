@@ -51,7 +51,17 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
           const logs = tx.meta?.logMessages ?? [];
           const ixLog = logs.find((l) => l.includes("Instruction:"));
           const ixName = ixLog?.replace(/.*Instruction: /, "")?.trim() ?? "";
-          if (!["Swap", "DepositLiquidity", "WithdrawLiquidity", "RedeemPair", "ClaimWinnings", "ResolveMarket"].includes(ixName)) continue;
+          if (
+            ![
+              "Swap",
+              "DepositLiquidity",
+              "WithdrawLiquidity",
+              "RedeemPair",
+              "ClaimWinnings",
+              "ResolveMarket",
+            ].includes(ixName)
+          )
+            continue;
 
           const wallet = tx.transaction.message.accountKeys[0]?.pubkey?.toBase58() ?? "";
           let type = ixName;
@@ -85,7 +95,9 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
               const usdcPost = post.find((p) => p.owner === wallet && p.mint === usdcMint);
               const usdcPre = pre.find((p) => p.owner === wallet && p.mint === usdcMint);
               if (usdcPost && usdcPre) {
-                const usdcDelta = Math.abs(Number(usdcPost.uiTokenAmount.amount) - Number(usdcPre.uiTokenAmount.amount));
+                const usdcDelta = Math.abs(
+                  Number(usdcPost.uiTokenAmount.amount) - Number(usdcPre.uiTokenAmount.amount),
+                );
                 const tokenDelta = Math.abs(delta);
                 if (tokenDelta > 0) {
                   const avgPrice = usdcDelta / tokenDelta;
@@ -106,11 +118,24 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
               ResolveMarket: { t: "RESOLVED", c: "text-text-hi" },
             };
             const info = labels[ixName];
-            if (info) { type = info.t; color = info.c; }
+            if (info) {
+              type = info.t;
+              color = info.c;
+            }
           }
 
-          results.push({ signature: sig.signature, time: sig.blockTime ?? 0, type, side, prob, wallet, color });
-        } catch { /* skip */ }
+          results.push({
+            signature: sig.signature,
+            time: sig.blockTime ?? 0,
+            type,
+            side,
+            prob,
+            wallet,
+            color,
+          });
+        } catch {
+          /* skip */
+        }
       }
       return results;
     },
@@ -124,7 +149,9 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
       <div className="text-caption">RECENT ACTIVITY</div>
 
       {isLoading && <p className="text-[11px] text-muted font-mono">Loading...</p>}
-      {!isLoading && (!trades || trades.length === 0) && <p className="text-[11px] text-muted font-mono">No activity yet.</p>}
+      {!isLoading && (!trades || trades.length === 0) && (
+        <p className="text-[11px] text-muted font-mono">No activity yet.</p>
+      )}
 
       {trades && trades.length > 0 && (
         <div className="space-y-[1px]">
@@ -137,14 +164,12 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
               className="flex items-center justify-between py-[5px] border-b border-line last:border-0 hover:bg-surface -mx-[4px] px-[4px] transition-all duration-[120ms]"
             >
               <div className="flex items-center gap-[6px]">
-                <span className={`text-[10px] font-mono font-medium uppercase tracking-[0.05em] ${t.color}`}>
+                <span
+                  className={`text-[10px] font-mono font-medium uppercase tracking-[0.05em] ${t.color}`}
+                >
                   {t.type}
                 </span>
-                {t.prob && (
-                  <span className="text-[10px] font-mono text-text-dim">
-                    at {t.prob}
-                  </span>
-                )}
+                {t.prob && <span className="text-[10px] font-mono text-text-dim">at {t.prob}</span>}
               </div>
               <div className="flex items-center gap-[8px] text-[10px] font-mono text-muted">
                 <span>{truncateWallet(t.wallet)}</span>

@@ -3,10 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { Program } from "@anchor-lang/core";
 import idl from "@/lib/pm_amm_idl.json";
-import { PROGRAM_ID } from "@/lib/constants";
 import { i80f48ToNumber } from "@/lib/pm-math";
+import { getReadOnlyProgram } from "@/lib/program";
 
 const LP_SEED = Buffer.from("lp");
 
@@ -29,11 +28,11 @@ export function useLpPosition(marketPda: string | undefined) {
       const marketKey = new PublicKey(marketPda);
       const [lpPda] = PublicKey.findProgramAddressSync(
         [LP_SEED, marketKey.toBuffer(), publicKey.toBuffer()],
-        new PublicKey(idl.address)
+        new PublicKey(idl.address),
       );
-      const program = new Program(idl as any, { connection } as any);
+      const { accounts } = getReadOnlyProgram(connection);
       try {
-        const lp = await (program.account as any).lpPosition.fetch(lpPda);
+        const lp = await accounts.lpPosition.fetch(lpPda);
         return {
           shares: i80f48ToNumber(lp.shares),
           collateralDeposited: Number(BigInt(lp.collateralDeposited.toString())),

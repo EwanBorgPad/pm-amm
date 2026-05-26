@@ -9,10 +9,10 @@ import {
   type TransactionInstruction,
 } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import { Program, BN } from "@anchor-lang/core";
-import idl from "@/lib/pm_amm_idl.json";
+import { BN } from "@anchor-lang/core";
 import { USDC_MINT } from "@/lib/constants";
 import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
+import { getReadOnlyProgram } from "@/lib/program";
 import { estimateSwapOutput } from "@/lib/pm-math";
 
 export type SwapMode = "buy" | "sell";
@@ -49,9 +49,7 @@ export function useSwapQuote(
       if (!publicKey || !marketPda || amount <= 0) return null;
 
       // Try on-chain simulation first
-      const onChain = await tryOnChainQuote(
-        connection, publicKey, marketPda, side, mode, amount,
-      );
+      const onChain = await tryOnChainQuote(connection, publicKey, marketPda, side, mode, amount);
       if (onChain) return onChain;
 
       // Fallback: client-side estimation using pm-AMM math
@@ -79,14 +77,22 @@ function clientSideQuote(
     // Sell YES/NO → USDC: mirror the buy math with reversed sides
     const sellSide = side === "yes" ? "no" : "yes";
     const est = estimateSwapOutput(
-      reserves.reserveYes, reserves.reserveNo, reserves.lEff, lamports, sellSide,
+      reserves.reserveYes,
+      reserves.reserveNo,
+      reserves.lEff,
+      lamports,
+      sellSide,
     );
     // For sell, output is USDC (the "extra" reserves freed by removing tokens)
     // Use the buy-reverse approximation
     return { output: Math.max(0, Math.floor(est.output)), error: null, estimated: true };
   }
   const est = estimateSwapOutput(
-    reserves.reserveYes, reserves.reserveNo, reserves.lEff, lamports, side,
+    reserves.reserveYes,
+    reserves.reserveNo,
+    reserves.lEff,
+    lamports,
+    side,
   );
   return { output: Math.max(0, Math.floor(est.output)), error: null, estimated: true };
 }
@@ -102,8 +108,10 @@ async function tryOnChainQuote(
 ): Promise<SwapQuote | null> {
   try {
     const market = new PublicKey(marketPda);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const program = new Program(idl as any, { connection } as any);
+    // Use the helper so the IDL address matches the env-driven PROGRAM_ID
+    // (the JSON ships with localnet; without the helper override the
+    // simulated tx targets the wrong program on devnet).
+    const { program } = getReadOnlyProgram(connection);
 
     const yesMint = deriveYesMint(market);
     const noMint = deriveNoMint(market);
@@ -113,8 +121,7 @@ async function tryOnChainQuote(
     const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
     const userNo = await getAssociatedTokenAddress(noMint, publicKey);
 
-    const outputAta =
-      mode === "buy" ? (side === "yes" ? userYes : userNo) : userUsdc;
+    const outputAta = mode === "buy" ? (side === "yes" ? userYes : userNo) : userUsdc;
 
     // Check which ATAs need creation
     const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");

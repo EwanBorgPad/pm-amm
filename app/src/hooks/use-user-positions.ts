@@ -24,10 +24,12 @@ export function useUserPositions(markets: MarketData[] | undefined) {
           try {
             const marketPda = new PublicKey(m.publicKey);
             const [yesMint] = PublicKey.findProgramAddressSync(
-              [Buffer.from("yes_mint"), marketPda.toBuffer()], PROGRAM_ID
+              [Buffer.from("yes_mint"), marketPda.toBuffer()],
+              PROGRAM_ID,
             );
             const [noMint] = PublicKey.findProgramAddressSync(
-              [Buffer.from("no_mint"), marketPda.toBuffer()], PROGRAM_ID
+              [Buffer.from("no_mint"), marketPda.toBuffer()],
+              PROGRAM_ID,
             );
 
             const yesAta = await getAssociatedTokenAddress(yesMint, publicKey);
@@ -47,7 +49,7 @@ export function useUserPositions(markets: MarketData[] | undefined) {
           } catch {
             // Skip markets where lookup fails
           }
-        })
+        }),
       );
 
       return held;

@@ -617,6 +617,38 @@ pub fn suggest_l_zero_for_budget(budget_usdc: u64, duration_secs: i64) -> Result
     Ok(budget / (phi_0 * sqrt_t))
 }
 
+/// Calibrate L_0 so that pool value at a non-50/50 target price equals the
+/// budget. V(P) = L_eff * phi(Phi_inv(P)) per paper section 7, so
+/// `L_0 = budget / (phi(Phi_inv(P)) * sqrt(T))`.
+///
+/// EXTENSION over the Paradigm pm-AMM paper: needed for `GroupMarket` legs
+/// that boot at `10_000 / N` bps instead of 50/50.
+pub fn suggest_l_zero_at_price(
+    budget_usdc: u64,
+    duration_secs: i64,
+    target_price: I80F48,
+) -> Result<I80F48> {
+    if budget_usdc == 0 {
+        return err!(PmAmmError::InvalidBudget);
+    }
+    if duration_secs <= 0 {
+        return err!(PmAmmError::InvalidDuration);
+    }
+    if target_price < PRICE_LOWER_BOUND || target_price > PRICE_UPPER_BOUND {
+        return err!(PmAmmError::InvalidPrice);
+    }
+
+    let budget = I80F48::from_num(budget_usdc);
+    let sqrt_t = sqrt_fixed(I80F48::from_num(duration_secs))?;
+    let u = capital_phi_inv_fixed(target_price)?;
+    let phi_u = phi_fixed(u)?;
+
+    if phi_u == ZERO {
+        return err!(PmAmmError::MathOverflow);
+    }
+    Ok(budget / (phi_u * sqrt_t))
+}
+
 // ============================================================================
 // Tests — cross-validated against oracle/test_vectors.json (scipy)
 // ============================================================================

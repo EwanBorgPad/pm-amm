@@ -1,5 +1,11 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builders use `(program.methods as any)` because the
+ * generated IDL TS types lag the on-chain struct between `anchor build` runs.
+ * Read-only paths use the typed namespace from `@/lib/program`.
+ */
+
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -8,10 +14,10 @@ import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useProgram } from "@/hooks/use-program";
-import { PublicKey, ComputeBudgetProgram, SystemProgram } from "@solana/web3.js";
+import { PublicKey, ComputeBudgetProgram, SystemProgram, Transaction } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT, METAPLEX_PROGRAM_ID, solscanTxUrl } from "@/lib/constants";
-import { formatUsdc, expectedDailyLvr, poolValue } from "@/lib/pm-math";
+import { formatUsdc, expectedDailyLvr, poolValue, phi, phiInv } from "@/lib/pm-math";
 import { BN } from "@anchor-lang/core";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -21,6 +27,9 @@ export default function CreateMarketPage() {
   const [durationValue, setDurationValue] = useState("30");
   const [durationUnit, setDurationUnit] = useState<"min" | "hours" | "days">("days");
   const [initialLiquidity, setInitialLiquidity] = useState("100");
+  // Initial YES price in percent (0..100). 50 = legacy default (5000 bps).
+  // Sent on-chain as basis points (5000 = 50%).
+  const [initialPricePct, setInitialPricePct] = useState("50");
   const [loading, setLoading] = useState(false);
   const program = useProgram();
   const { publicKey } = useWallet();
@@ -28,16 +37,24 @@ export default function CreateMarketPage() {
 
   // --- Computed values for simulation ---
   const durNum = parseFloat(durationValue) || 0;
-  const durSeconds = durationUnit === "min" ? durNum * 60 : durationUnit === "hours" ? durNum * 3600 : durNum * 86400;
+  const durSeconds =
+    durationUnit === "min"
+      ? durNum * 60
+      : durationUnit === "hours"
+        ? durNum * 3600
+        : durNum * 86400;
   const liquidity = parseFloat(initialLiquidity) || 0;
   const liqLamports = liquidity * 1e6;
 
-  // PM-AMM math: L_0 = budget / (phi(0) * sqrt(T)), L_eff = L_0 * sqrt(T) = budget / phi(0)
-  const PHI_0 = 0.3989422804014327;
-  const lEff = liqLamports > 0 ? liqLamports / PHI_0 : 0;
-  const pv = lEff > 0 ? poolValue(0.5, lEff) : 0;
-  const dailyLvr = durSeconds > 0 && lEff > 0 ? expectedDailyLvr(0.5, lEff, durSeconds) : 0;
-  const expectedReturn = liqLamports / 2; // E[W_T] = W_0/2
+  // Mirror pm_math::suggest_l_zero_at_price: L_eff = budget / phi(Phi_inv(P)).
+  // Collapses to budget / phi(0) when seedPrice = 0.5.
+  const seedPct = Math.max(1, Math.min(99, parseFloat(initialPricePct) || 50));
+  const seedPrice = seedPct / 100;
+  const phiAtSeed = phi(phiInv(seedPrice));
+  const lEff = liqLamports > 0 && phiAtSeed > 0 ? liqLamports / phiAtSeed : 0;
+  const pv = lEff > 0 ? poolValue(seedPrice, lEff) : 0;
+  const dailyLvr = durSeconds > 0 && lEff > 0 ? expectedDailyLvr(seedPrice, lEff, durSeconds) : 0;
+  const expectedReturn = liqLamports / 2; // E[W_T] = W_0/2 (paper §8)
   const expectedLoss = liqLamports - expectedReturn;
 
   const handleCreate = async () => {
@@ -54,67 +71,100 @@ export default function CreateMarketPage() {
 
       const [marketPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("market"), new BN(marketId).toArrayLike(Buffer, "le", 8)],
-        program.programId
+        program.programId,
       );
       const [yesMint] = PublicKey.findProgramAddressSync(
-        [Buffer.from("yes_mint"), marketPda.toBuffer()], program.programId);
+        [Buffer.from("yes_mint"), marketPda.toBuffer()],
+        program.programId,
+      );
       const [noMint] = PublicKey.findProgramAddressSync(
-        [Buffer.from("no_mint"), marketPda.toBuffer()], program.programId);
+        [Buffer.from("no_mint"), marketPda.toBuffer()],
+        program.programId,
+      );
       const [vault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), marketPda.toBuffer()], program.programId);
+        [Buffer.from("vault"), marketPda.toBuffer()],
+        program.programId,
+      );
 
       const TOKEN_METADATA_PROGRAM = METAPLEX_PROGRAM_ID;
       const [yesMetadata] = PublicKey.findProgramAddressSync(
         [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), yesMint.toBuffer()],
-        TOKEN_METADATA_PROGRAM
+        TOKEN_METADATA_PROGRAM,
       );
       const [noMetadata] = PublicKey.findProgramAddressSync(
         [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), noMint.toBuffer()],
-        TOKEN_METADATA_PROGRAM
+        TOKEN_METADATA_PROGRAM,
       );
 
-      const tx1 = await (program.methods as any)
-        .initializeMarket(new BN(marketId), new BN(endTs), name)
+      // Convert percent → basis points. Default 50% → 5000 bps.
+      // The program accepts 0 (legacy 50/50) or 100..=9900 (1%..99%).
+      const initialPriceBps = Math.round(seedPct * 100);
+
+      // Build initialize_market + (optional) deposit_liquidity into a single
+      // transaction so the user only sees one Phantom prompt.
+      const initIx = await (program.methods as any)
+        .initializeMarket(new BN(marketId), new BN(endTs), name, initialPriceBps)
         .accounts({
-          authority: publicKey, market: marketPda, collateralMint: USDC_MINT,
-          yesMint, noMint, vault,
-          yesMetadata, noMetadata,
+          authority: publicKey,
+          market: marketPda,
+          collateralMint: USDC_MINT,
+          yesMint,
+          noMint,
+          vault,
+          yesMetadata,
+          noMetadata,
           tokenMetadataProgram: TOKEN_METADATA_PROGRAM,
-          systemProgram: SystemProgram.programId, tokenProgram: TOKEN_PROGRAM_ID,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
           rent: new PublicKey("SysvarRent111111111111111111111111111111111"),
         })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-        .rpc();
+        .instruction();
 
-      toast.success("Market created", {
-        description: `ID: ${marketId}`,
-        action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx1), "_blank") },
-      });
+      const tx = new Transaction().add(
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+        initIx,
+      );
 
       if (liquidity > 0) {
         const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
         const [lpPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("lp"), marketPda.toBuffer(), publicKey.toBuffer()],
-          program.programId
+          program.programId,
         );
-        const tx2 = await (program.methods as any)
+        const depositIx = await (program.methods as any)
           .depositLiquidity(new BN(Math.floor(liqLamports)))
           .accounts({
-            signer: publicKey, market: marketPda, collateralMint: USDC_MINT,
-            vault, userCollateral: userUsdc, lpPosition: lpPda,
-            systemProgram: SystemProgram.programId, tokenProgram: TOKEN_PROGRAM_ID,
+            signer: publicKey,
+            market: marketPda,
+            collateralMint: USDC_MINT,
+            vault,
+            userCollateral: userUsdc,
+            lpPosition: lpPda,
+            systemProgram: SystemProgram.programId,
+            tokenProgram: TOKEN_PROGRAM_ID,
           })
-          .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-          .rpc();
-        toast.success(`Deposited ${liquidity} USDC`, {
-          action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx2), "_blank") },
-        });
+          .instruction();
+        tx.add(depositIx);
       }
+
+      const sig = await (program.provider as any).sendAndConfirm(tx, []);
+      toast.success("Market created", {
+        description:
+          liquidity > 0 ? `ID: ${marketId} · Deposited ${liquidity} USDC` : `ID: ${marketId}`,
+        action: {
+          label: "Solscan ↗",
+          onClick: () => window.open(solscanTxUrl(sig), "_blank"),
+        },
+      });
 
       router.push(`/market/${marketId}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("WalletSign") || msg.includes("User rejected")) { toast.info("Transaction cancelled"); setLoading(false); return; }
+      if (msg.includes("WalletSign") || msg.includes("User rejected")) {
+        toast.info("Transaction cancelled");
+        setLoading(false);
+        return;
+      }
       toast.error("Creation failed", { description: msg.slice(0, 150) });
     } finally {
       setLoading(false);
@@ -142,7 +192,9 @@ export default function CreateMarketPage() {
             {/* Question */}
             <div>
               <div className="text-caption mb-[8px]">QUESTION</div>
-              <div className={`border rounded-lg px-[12px] transition-all duration-[120ms] ${name.length > 64 ? "border-no" : "border-line-2 focus-within:border-muted"}`}>
+              <div
+                className={`border rounded-lg px-[12px] transition-all duration-[120ms] ${name.length > 64 ? "border-no" : "border-line-2 focus-within:border-muted"}`}
+              >
                 <input
                   className="bg-transparent border-none outline-none text-text-hi text-[14px] py-[10px] w-full"
                   placeholder="Will BTC hit $200k by December?"
@@ -152,7 +204,11 @@ export default function CreateMarketPage() {
                 />
               </div>
               <div className="flex justify-end mt-[4px]">
-                <span className={`text-[10px] font-mono ${name.length > 64 ? "text-no" : "text-muted"}`}>{name.length}/64</span>
+                <span
+                  className={`text-[10px] font-mono ${name.length > 64 ? "text-no" : "text-muted"}`}
+                >
+                  {name.length}/64
+                </span>
               </div>
             </div>
 
@@ -182,10 +238,25 @@ export default function CreateMarketPage() {
 
               <div className="flex gap-[6px] mb-[8px]">
                 {(durationUnit === "min"
-                  ? [{ label: "10m", val: "10" }, { label: "30m", val: "30" }, { label: "45m", val: "45" }, { label: "60m", val: "60" }]
+                  ? [
+                      { label: "10m", val: "10" },
+                      { label: "30m", val: "30" },
+                      { label: "45m", val: "45" },
+                      { label: "60m", val: "60" },
+                    ]
                   : durationUnit === "hours"
-                    ? [{ label: "2h", val: "2" }, { label: "6h", val: "6" }, { label: "12h", val: "12" }, { label: "24h", val: "24" }]
-                    : [{ label: "1d", val: "1" }, { label: "7d", val: "7" }, { label: "14d", val: "14" }, { label: "30d", val: "30" }]
+                    ? [
+                        { label: "2h", val: "2" },
+                        { label: "6h", val: "6" },
+                        { label: "12h", val: "12" },
+                        { label: "24h", val: "24" },
+                      ]
+                    : [
+                        { label: "1d", val: "1" },
+                        { label: "7d", val: "7" },
+                        { label: "14d", val: "14" },
+                        { label: "30d", val: "30" },
+                      ]
                 ).map((p) => (
                   <button
                     key={p.label}
@@ -222,9 +293,32 @@ export default function CreateMarketPage() {
               step="1"
             />
 
+            {/* Initial YES price (% — 50% is the legacy default; pick a different
+                value if this market belongs to a multi-outcome group: 100/N) */}
+            <AmountInput
+              label="INITIAL YES PRICE"
+              unit="%"
+              type="number"
+              placeholder="50"
+              value={initialPricePct}
+              onChange={(e) => setInitialPricePct(e.target.value)}
+              min="1"
+              max="99"
+              step="0.01"
+            />
+            <p className="text-[10px] text-muted/70 font-mono -mt-[8px]">
+              50% = standard binary market. For a group leg of N outcomes, use {"{100 / N}"}% (e.g.
+              7.14 for 14 teams).
+            </p>
+
             {expires && (
               <p className="text-[11px] text-muted font-mono">
-                Expires {expires.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}{" "}
+                Expires{" "}
+                {expires.toLocaleDateString("en-US", {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}{" "}
                 {expires.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}
               </p>
             )}
@@ -239,8 +333,26 @@ export default function CreateMarketPage() {
             </Button>
 
             {!publicKey && (
-              <p className="text-[11px] text-muted font-mono text-center">Connect wallet to create.</p>
+              <p className="text-[11px] text-muted font-mono text-center">
+                Connect wallet to create.
+              </p>
             )}
+
+            <div className="pt-[8px] border-t border-line">
+              <p className="text-[10px] font-mono text-muted uppercase tracking-[0.05em] mb-[8px]">
+                Multi-outcome (N teams / candidates)
+              </p>
+              <Link
+                href="/create-group"
+                className="block border border-line-2 rounded-lg px-[12px] py-[10px] text-[12px] font-mono text-text-hi hover:bg-surface-2 transition-all duration-[120ms]"
+              >
+                → Create a group market (2..32 legs)
+              </Link>
+              <p className="text-[10px] text-muted/60 font-mono mt-[6px]">
+                Wraps N binary markets seeded at 100/N% each so Σ p_i = 1 at open. One form, the UI
+                orchestrates all transactions.
+              </p>
+            </div>
           </div>
 
           {/* Right: LP simulation */}
@@ -251,19 +363,9 @@ export default function CreateMarketPage() {
               <>
                 <MetaRow label="Pool Value" value={`$${formatUsdc(pv)}`} />
                 <MetaRow label="Daily LVR cost" value={`$${formatUsdc(dailyLvr)}`} />
-                <MetaRow
-                  label="Expected return"
-                  value={`~$${formatUsdc(expectedReturn)}`}
-                />
-                <MetaRow
-                  label="Expected loss (LVR)"
-                  value={`~$${formatUsdc(expectedLoss)}`}
-                />
-                <MetaRow
-                  label="Return %"
-                  value="-50.0%"
-                  last
-                />
+                <MetaRow label="Expected return" value={`~$${formatUsdc(expectedReturn)}`} />
+                <MetaRow label="Expected loss (LVR)" value={`~$${formatUsdc(expectedLoss)}`} />
+                <MetaRow label="Return %" value="-50.0%" last />
 
                 {/* Visual bar */}
                 <div className="pt-[8px]">
@@ -277,7 +379,8 @@ export default function CreateMarketPage() {
                 </div>
 
                 <p className="text-[10px] text-muted/60 font-mono pt-[4px]">
-                  Based on E[W_T] = W_0/2 (random walk). Actual returns depend on trading activity and price path.
+                  Based on E[W_T] = W_0/2 (random walk). Actual returns depend on trading activity
+                  and price path.
                 </p>
               </>
             ) : (

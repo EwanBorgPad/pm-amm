@@ -1,5 +1,11 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builders use `(program.methods as any)` because the
+ * generated IDL TS types lag the on-chain struct between `anchor build` runs.
+ * Read-only paths use the typed namespace from `@/lib/program`.
+ */
+
 import { use, useState } from "react";
 import { StatusBar } from "@/components/layout/status-bar";
 import { Figure } from "@/components/ui/figure";
@@ -19,7 +25,6 @@ import {
   formatUsdc,
   poolValue,
   expectedDailyLvr,
-  expectedTerminalWealth,
   simulateLpDeposit,
   lpPositionPnl,
   formatTimeRemaining,
@@ -70,22 +75,38 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
   const dailyLvr = market ? expectedDailyLvr(market.price, market.lEff, remaining) : 0;
 
   // --- Position P&L ---
-  const posData = market && lp && lp.shares > 0
-    ? lpPositionPnl(
-        lp.shares, market.totalLpShares, lp.collateralDeposited, market.price, market.lEff,
-        market.cumYesPerShare, market.cumNoPerShare, lp.yesCheckpoint, lp.noCheckpoint,
-        tokens?.yes ?? 0, tokens?.no ?? 0, market.reserveYes, market.reserveNo,
-      )
-    : null;
+  const posData =
+    market && lp && lp.shares > 0
+      ? lpPositionPnl(
+          lp.shares,
+          market.totalLpShares,
+          lp.collateralDeposited,
+          market.price,
+          market.lEff,
+          market.cumYesPerShare,
+          market.cumNoPerShare,
+          lp.yesCheckpoint,
+          lp.noCheckpoint,
+          tokens?.yes ?? 0,
+          tokens?.no ?? 0,
+          market.reserveYes,
+          market.reserveNo,
+        )
+      : null;
 
   // --- Deposit simulation ---
   const depositNum = parseFloat(depositAmt) || 0;
-  const depositSim = market && depositNum > 0
-    ? simulateLpDeposit(
-        depositNum * 1e6, market.price, market.lEff,
-        market.totalLpShares, remaining, market.lZero,
-      )
-    : null;
+  const depositSim =
+    market && depositNum > 0
+      ? simulateLpDeposit(
+          depositNum * 1e6,
+          market.price,
+          market.lEff,
+          market.totalLpShares,
+          remaining,
+          market.lZero,
+        )
+      : null;
 
   // --- Handlers ---
   const handleDeposit = async () => {
@@ -94,17 +115,26 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
     try {
       const mPda = new PublicKey(market.publicKey);
       const vault = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mPda.toBuffer()], program.programId)[0];
+        [Buffer.from("vault"), mPda.toBuffer()],
+        program.programId,
+      )[0];
       const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
       const [lpPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()], program.programId);
+        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()],
+        program.programId,
+      );
 
       const tx = await (program.methods as any)
         .depositLiquidity(new BN(Math.floor(depositNum * 1e6)))
         .accounts({
-          signer: publicKey, market: mPda, collateralMint: USDC_MINT,
-          vault, userCollateral: userUsdc, lpPosition: lpPda,
-          systemProgram: SystemProgram.programId, tokenProgram: TOKEN_PROGRAM_ID,
+          signer: publicKey,
+          market: mPda,
+          collateralMint: USDC_MINT,
+          vault,
+          userCollateral: userUsdc,
+          lpPosition: lpPda,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
         .rpc();
@@ -137,23 +167,38 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
       const userYes = await getAssociatedTokenAddress(yMint, publicKey);
       const userNo = await getAssociatedTokenAddress(nMint, publicKey);
       const [lpPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()], program.programId);
+        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()],
+        program.programId,
+      );
 
       const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
-      for (const [ata, mint] of [[userYes, yMint], [userNo, nMint]] as [PublicKey, PublicKey][]) {
-        try { await getAccount(conn, ata); } catch {
+      const preIxs: TransactionInstruction[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ];
+      for (const [ata, mint] of [
+        [userYes, yMint],
+        [userNo, nMint],
+      ] as [PublicKey, PublicKey][]) {
+        try {
+          await getAccount(conn, ata);
+        } catch {
           preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
         }
       }
 
-      const sharesBn = new BN((BigInt(Math.floor(lp.shares * 2 ** 48))).toString());
+      const sharesBn = new BN(BigInt(Math.floor(lp.shares * 2 ** 48)).toString());
       const tx = await (program.methods as any)
         .withdrawLiquidity(sharesBn)
         .accounts({
-          signer: publicKey, market: mPda, collateralMint: USDC_MINT,
-          yesMint: yMint, noMint: nMint, lpPosition: lpPda,
-          userYes, userNo, tokenProgram: TOKEN_PROGRAM_ID,
+          signer: publicKey,
+          market: mPda,
+          collateralMint: USDC_MINT,
+          yesMint: yMint,
+          noMint: nMint,
+          lpPosition: lpPda,
+          userYes,
+          userNo,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions(preIxs)
         .rpc();
@@ -189,16 +234,22 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
         </div>
 
         {isLoading && <p className="text-muted font-mono text-[12px]">Loading...</p>}
-        {!isLoading && !market && <p className="text-no font-mono text-[12px]">Market not found.</p>}
+        {!isLoading && !market && (
+          <p className="text-no font-mono text-[12px]">Market not found.</p>
+        )}
 
         {market && (
           <div className="space-y-[24px]">
             {/* Title */}
             <div className="flex items-center gap-[12px] flex-wrap">
               <h2 className="text-title">Provide Liquidity</h2>
-              {isExpired
-                ? <Badge variant="no">Expired</Badge>
-                : <Badge variant="yes" dot>{formatTimeRemaining(market.endTs)} left</Badge>}
+              {isExpired ? (
+                <Badge variant="no">Expired</Badge>
+              ) : (
+                <Badge variant="yes" dot>
+                  {formatTimeRemaining(market.endTs)} left
+                </Badge>
+              )}
             </div>
 
             {/* Pool Overview */}
@@ -207,36 +258,53 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
               <div className="flex gap-[32px] flex-wrap">
                 <Figure label="Pool Value" value={`$${formatUsdc(pv)}`} size="data" />
                 <Figure label="YES Price" value={market.price.toFixed(4)} size="data" color="yes" />
-                <Figure label="NO Price" value={(1 - market.price).toFixed(4)} size="data" color="no" />
+                <Figure
+                  label="NO Price"
+                  value={(1 - market.price).toFixed(4)}
+                  size="data"
+                  color="no"
+                />
               </div>
               <MetaRow label="Total LP Shares" value={market.totalLpShares.toFixed(2)} />
               <MetaRow label="L_0" value={market.lZero.toFixed(6)} />
               <MetaRow label="L_eff" value={market.lEff.toFixed(2)} />
-              <MetaRow
-                label="Expected Daily LVR"
-                value={`$${formatUsdc(dailyLvr)}`}
-                last
-              />
+              <MetaRow label="Expected Daily LVR" value={`$${formatUsdc(dailyLvr)}`} last />
             </div>
 
             {/* LP Economics */}
             <div className="border border-line p-[16px] space-y-[12px]">
               <div className="text-caption">LP ECONOMICS — pm-AMM</div>
               <div className="space-y-[6px] text-[12px] text-muted font-mono">
-                <p>LPs earn YES+NO tokens over time via the <span className="text-text-hi">dC_t mechanism</span> (residuals). Your payout depends on which side wins.</p>
-                <p>The <span className="text-text-hi">LVR cost</span> (loss vs rebalancing) is the fee traders implicitly pay you. It&apos;s uniform across time and price — the key innovation of pm-AMM.</p>
-                <p>On average across many markets (random walk), LPs keep ~50% of their deposit. But on <span className="text-text-hi">individual markets</span>, you can profit or lose more depending on the outcome.</p>
+                <p>
+                  LPs earn YES+NO tokens over time via the{" "}
+                  <span className="text-text-hi">dC_t mechanism</span> (residuals). Your payout
+                  depends on which side wins.
+                </p>
+                <p>
+                  The <span className="text-text-hi">LVR cost</span> (loss vs rebalancing) is the
+                  fee traders implicitly pay you. It&apos;s uniform across time and price — the key
+                  innovation of pm-AMM.
+                </p>
+                <p>
+                  On average across many markets (random walk), LPs keep ~50% of their deposit. But
+                  on <span className="text-text-hi">individual markets</span>, you can profit or
+                  lose more depending on the outcome.
+                </p>
               </div>
               {lp && lp.collateralDeposited > 0 && posData && (
                 <>
                   <MetaRow
                     label="Expected value (prob-weighted)"
                     value={(() => {
-                      const ev = posData.ifYesWins * market.price + posData.ifNoWins * (1 - market.price);
-                      const evPct = ((ev - lp.collateralDeposited) / lp.collateralDeposited * 100);
-                      return <span className={evPct >= 0 ? "text-yes" : "text-no"}>
-                        ${formatUsdc(ev)} ({evPct >= 0 ? "+" : ""}{evPct.toFixed(1)}%)
-                      </span>;
+                      const ev =
+                        posData.ifYesWins * market.price + posData.ifNoWins * (1 - market.price);
+                      const evPct = ((ev - lp.collateralDeposited) / lp.collateralDeposited) * 100;
+                      return (
+                        <span className={evPct >= 0 ? "text-yes" : "text-no"}>
+                          ${formatUsdc(ev)} ({evPct >= 0 ? "+" : ""}
+                          {evPct.toFixed(1)}%)
+                        </span>
+                      );
                     })()}
                     last
                   />
@@ -251,29 +319,46 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                 <MetaRow label="Deposited" value={`$${formatUsdc(lp.collateralDeposited)}`} />
                 <MetaRow label="Pool Share" value={`${posData.poolSharePct.toFixed(2)}%`} />
                 <MetaRow label="Still in pool" value={`$${formatUsdc(posData.poolValue)}`} />
-                <MetaRow label="YES tokens (pending+wallet)" value={`${formatUsdc(posData.totalYes)}`} />
-                <MetaRow label="NO tokens (pending+wallet)" value={`${formatUsdc(posData.totalNo)}`} />
+                <MetaRow
+                  label="YES tokens (pending+wallet)"
+                  value={`${formatUsdc(posData.totalYes)}`}
+                />
+                <MetaRow
+                  label="NO tokens (pending+wallet)"
+                  value={`${formatUsdc(posData.totalNo)}`}
+                />
 
                 <div className="border-t border-line pt-[8px] mt-[8px]">
-                  <p className="text-[10px] text-muted uppercase tracking-[0.08em] mb-[6px]">AT RESOLUTION</p>
+                  <p className="text-[10px] text-muted uppercase tracking-[0.08em] mb-[6px]">
+                    AT RESOLUTION
+                  </p>
                   {(() => {
                     const dep = lp.collateralDeposited;
                     const yesReturn = posData.ifYesWins;
                     const noReturn = posData.ifNoWins;
-                    const yesPnl = ((yesReturn - dep) / dep * 100);
-                    const noPnl = ((noReturn - dep) / dep * 100);
+                    const yesPnl = ((yesReturn - dep) / dep) * 100;
+                    const noPnl = ((noReturn - dep) / dep) * 100;
                     return (
                       <>
-                        <MetaRow label="If YES wins" value={
-                          <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
-                            ${formatUsdc(yesReturn)} ({yesPnl >= 0 ? "+" : ""}{yesPnl.toFixed(1)}%)
-                          </span>
-                        } />
-                        <MetaRow label="If NO wins" value={
-                          <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
-                            ${formatUsdc(noReturn)} ({noPnl >= 0 ? "+" : ""}{noPnl.toFixed(1)}%)
-                          </span>
-                        } last />
+                        <MetaRow
+                          label="If YES wins"
+                          value={
+                            <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
+                              ${formatUsdc(yesReturn)} ({yesPnl >= 0 ? "+" : ""}
+                              {yesPnl.toFixed(1)}%)
+                            </span>
+                          }
+                        />
+                        <MetaRow
+                          label="If NO wins"
+                          value={
+                            <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
+                              ${formatUsdc(noReturn)} ({noPnl >= 0 ? "+" : ""}
+                              {noPnl.toFixed(1)}%)
+                            </span>
+                          }
+                          last
+                        />
                       </>
                     );
                   })()}
@@ -291,9 +376,7 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
             )}
 
             {/* Residuals */}
-            {lp && lp.shares > 0 && (
-              <ResidualsWidget market={market} />
-            )}
+            {lp && lp.shares > 0 && <ResidualsWidget market={market} />}
 
             {/* Deposit */}
             {!isExpired && !market.resolved && (
@@ -324,16 +407,26 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                 {/* Deposit simulation */}
                 {depositSim && depositNum > 0 && (
                   <div className="border-t border-line pt-[8px] space-y-[2px]">
-                    <MetaRow label="Shares received" value={`${(depositSim.newShares / 1e6).toFixed(2)}`} />
-                    <MetaRow label="Your pool share" value={`${depositSim.poolSharePct.toFixed(2)}%`} />
-                    <MetaRow label="Est. daily yield (dC_t)" value={`$${formatUsdc(depositSim.estDailyYield)}`} />
+                    <MetaRow
+                      label="Shares received"
+                      value={`${(depositSim.newShares / 1e6).toFixed(2)}`}
+                    />
+                    <MetaRow
+                      label="Your pool share"
+                      value={`${depositSim.poolSharePct.toFixed(2)}%`}
+                    />
+                    <MetaRow
+                      label="Est. daily yield (dC_t)"
+                      value={`$${formatUsdc(depositSim.estDailyYield)}`}
+                    />
                     <MetaRow
                       label="Expected at expiry"
-                      value={`~$${formatUsdc(depositNum * 1e6 / 2)}`}
+                      value={`~$${formatUsdc((depositNum * 1e6) / 2)}`}
                       last
                     />
                     <p className="text-[10px] text-muted/60 font-mono pt-[4px]">
-                      Based on E[W_T] = W_0/2 (random walk assumption). Actual returns depend on price path.
+                      Based on E[W_T] = W_0/2 (random walk assumption). Actual returns depend on
+                      price path.
                     </p>
                   </div>
                 )}

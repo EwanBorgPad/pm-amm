@@ -1,5 +1,5 @@
 {
-  "address": "8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj",
+  "address": "Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK",
   "metadata": {
     "name": "pm_amm",
     "version": "0.1.0",
@@ -32,6 +32,72 @@
       "args": []
     },
     {
+      "name": "attach_leg_to_group",
+      "docs": [
+        "Attach an existing binary Market PDA to a leg slot of a GroupMarket.",
+        "Enforces same authority, same end_ts, and seed price = 10_000/N bps."
+      ],
+      "discriminator": [
+        28,
+        153,
+        111,
+        127,
+        89,
+        110,
+        164,
+        253
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "group_market",
+          "writable": true
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "leg_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "cancel_group_market",
+      "docs": [
+        "Cancel an abandoned GroupMarket past expiration. Marks it resolved with",
+        "`NO_WINNING_LEG`, so attached legs can then be finalized as `Side::No`",
+        "via `resolve_group_leg`. Authority-only."
+      ],
+      "discriminator": [
+        165,
+        237,
+        140,
+        189,
+        29,
+        120,
+        203,
+        131
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "group_market",
+          "writable": true
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_lp_residuals",
       "docs": [
         "Claim pending YES+NO residuals accrued to an LP position.",
@@ -58,28 +124,13 @@
         },
         {
           "name": "yes_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "no_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "pool_yes",
-          "docs": [
-            "Sprint 20: pool reserve ATAs (PDA authority)."
-          ],
           "writable": true,
           "relations": [
             "market"
           ]
         },
         {
-          "name": "pool_no",
+          "name": "no_mint",
           "writable": true,
           "relations": [
             "market"
@@ -211,10 +262,8 @@
     {
       "name": "deposit_liquidity",
       "docs": [
-        "Sprint 20: Deposit USDC liquidity with full collateral backing.",
-        "`amount` must be ≥ max(target_x, target_y) to back the pool reserves",
-        "(Polymarket-style invariant: vault.usdc == yes_supply == no_supply).",
-        "`budget_usdc` calibrates L_0 on first deposit, ignored on subsequent."
+        "Deposit USDC as liquidity. First deposit bootstraps L_0 at 50/50 price.",
+        "Subsequent deposits scale L_0 proportionally to preserve the current price."
       ],
       "discriminator": [
         245,
@@ -243,20 +292,6 @@
           ]
         },
         {
-          "name": "yes_mint",
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "no_mint",
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
           "name": "vault",
           "writable": true,
           "relations": [
@@ -264,35 +299,7 @@
           ]
         },
         {
-          "name": "pool_yes",
-          "docs": [
-            "Sprint 20: pool's YES reserves ATA (Market PDA authority)."
-          ],
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "pool_no",
-          "docs": [
-            "Sprint 20: pool's NO  reserves ATA (Market PDA authority)."
-          ],
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
           "name": "user_collateral",
-          "writable": true
-        },
-        {
-          "name": "user_yes",
-          "writable": true
-        },
-        {
-          "name": "user_no",
           "writable": true
         },
         {
@@ -331,10 +338,76 @@
         {
           "name": "amount",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_group_market",
+      "docs": [
+        "Create a GroupMarket wrapping `leg_count` binary markets as a",
+        "categorical (multi-outcome) prediction market. Legs are attached",
+        "separately via `attach_leg_to_group` and must each be seeded at",
+        "`10_000 / leg_count` bps so Σ p_i = 1 at open."
+      ],
+      "discriminator": [
+        117,
+        158,
+        140,
+        184,
+        36,
+        187,
+        244,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
         },
         {
-          "name": "budget_usdc",
+          "name": "group_market",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  111,
+                  117,
+                  112
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "group_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "group_id",
           "type": "u64"
+        },
+        {
+          "name": "end_ts",
+          "type": "i64"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "leg_count",
+          "type": "u8"
         }
       ]
     },
@@ -342,7 +415,10 @@
       "name": "initialize_market",
       "docs": [
         "Create a new prediction market with YES/NO mints, a USDC vault,",
-        "and Metaplex token metadata for wallet display."
+        "and Metaplex token metadata for wallet display.",
+        "",
+        "`initial_price_bps` seeds the YES price at first deposit. Pass `0` for",
+        "the legacy 50/50 default. For multi-outcome groups, pass `10_000 / N`."
       ],
       "discriminator": [
         35,
@@ -461,61 +537,6 @@
           }
         },
         {
-          "name": "pool_yes",
-          "docs": [
-            "Sprint 20: pool's YES token reserves (real backing)."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108,
-                  95,
-                  121,
-                  101,
-                  115
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market"
-              }
-            ]
-          }
-        },
-        {
-          "name": "pool_no",
-          "docs": [
-            "Sprint 20: pool's NO token reserves (real backing)."
-          ],
-          "writable": true,
-          "pda": {
-            "seeds": [
-              {
-                "kind": "const",
-                "value": [
-                  112,
-                  111,
-                  111,
-                  108,
-                  95,
-                  110,
-                  111
-                ]
-              },
-              {
-                "kind": "account",
-                "path": "market"
-              }
-            ]
-          }
-        },
-        {
           "name": "yes_metadata",
           "writable": true
         },
@@ -556,82 +577,6 @@
         {
           "name": "initial_price_bps",
           "type": "u16"
-        }
-      ]
-    },
-    {
-      "name": "mint_pair",
-      "docs": [
-        "Sprint 20: Mint 1 YES + 1 NO from 1 USDC. Inverse of redeem_pair.",
-        "Used as the first leg of \"buy YES/NO\" trades (mint_pair → swap_yes_no)."
-      ],
-      "discriminator": [
-        19,
-        149,
-        94,
-        110,
-        181,
-        186,
-        33,
-        107
-      ],
-      "accounts": [
-        {
-          "name": "signer",
-          "writable": true,
-          "signer": true
-        },
-        {
-          "name": "market"
-        },
-        {
-          "name": "collateral_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "yes_mint",
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "no_mint",
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "vault",
-          "writable": true,
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "user_collateral",
-          "writable": true
-        },
-        {
-          "name": "user_yes",
-          "writable": true
-        },
-        {
-          "name": "user_no",
-          "writable": true
-        },
-        {
-          "name": "token_program",
-          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
-        }
-      ],
-      "args": [
-        {
-          "name": "amount",
-          "type": "u64"
         }
       ]
     },
@@ -711,6 +656,72 @@
       ]
     },
     {
+      "name": "resolve_group",
+      "docs": [
+        "Resolve a GroupMarket: authority picks the winning leg.",
+        "Must run after expiration and after all legs are attached."
+      ],
+      "discriminator": [
+        61,
+        207,
+        24,
+        75,
+        145,
+        186,
+        16,
+        118
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "signer": true
+        },
+        {
+          "name": "group_market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "winning_leg",
+          "type": "u8"
+        }
+      ]
+    },
+    {
+      "name": "resolve_group_leg",
+      "docs": [
+        "Cascade-resolve one leg of a resolved GroupMarket. Permissionless:",
+        "the group's `winning_leg` is the source of truth (winning → Yes,",
+        "all others → No)."
+      ],
+      "discriminator": [
+        177,
+        186,
+        101,
+        235,
+        171,
+        48,
+        122,
+        23
+      ],
+      "accounts": [
+        {
+          "name": "group_market"
+        },
+        {
+          "name": "market",
+          "writable": true
+        }
+      ],
+      "args": [
+        {
+          "name": "leg_index",
+          "type": "u8"
+        }
+      ]
+    },
+    {
       "name": "resolve_market",
       "docs": [
         "Resolve the market after expiration. Authority-only.",
@@ -780,21 +791,20 @@
       ]
     },
     {
-      "name": "swap_yes_no",
+      "name": "swap",
       "docs": [
-        "Sprint 20: Pure YES↔NO swap on the pm-AMM curve. USDC↔YES/NO trades",
-        "are constructed client-side as atomic combos (mint_pair + swap_yes_no",
-        "for buy, swap_yes_no + redeem_pair for sell)."
+        "Swap between USDC, YES, and NO tokens (6 directions).",
+        "Updates reserves and enforces the pm-AMM invariant."
       ],
       "discriminator": [
-        169,
-        106,
-        120,
-        195,
-        169,
-        11,
-        252,
-        52
+        248,
+        198,
+        158,
+        145,
+        225,
+        117,
+        135,
+        200
       ],
       "accounts": [
         {
@@ -807,30 +817,35 @@
           "writable": true
         },
         {
+          "name": "collateral_mint",
+          "relations": [
+            "market"
+          ]
+        },
+        {
           "name": "yes_mint",
+          "writable": true,
           "relations": [
             "market"
           ]
         },
         {
           "name": "no_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "pool_yes",
           "writable": true,
           "relations": [
             "market"
           ]
         },
         {
-          "name": "pool_no",
+          "name": "vault",
           "writable": true,
           "relations": [
             "market"
           ]
+        },
+        {
+          "name": "user_collateral",
+          "writable": true
         },
         {
           "name": "user_yes",
@@ -850,7 +865,7 @@
           "name": "direction",
           "type": {
             "defined": {
-              "name": "YesNoDirection"
+              "name": "SwapDirection"
             }
           }
         },
@@ -898,28 +913,13 @@
         },
         {
           "name": "yes_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "no_mint",
-          "relations": [
-            "market"
-          ]
-        },
-        {
-          "name": "pool_yes",
-          "docs": [
-            "Sprint 20: pool reserve ATAs (PDA authority)"
-          ],
           "writable": true,
           "relations": [
             "market"
           ]
         },
         {
-          "name": "pool_no",
+          "name": "no_mint",
           "writable": true,
           "relations": [
             "market"
@@ -970,6 +970,19 @@
     }
   ],
   "accounts": [
+    {
+      "name": "GroupMarket",
+      "discriminator": [
+        64,
+        120,
+        105,
+        242,
+        92,
+        182,
+        3,
+        113
+      ]
+    },
     {
       "name": "LpPosition",
       "discriminator": [
@@ -1100,16 +1113,153 @@
     },
     {
       "code": 6017,
-      "name": "InvalidInitialPrice",
-      "msg": "Initial price must be between 0.01 and 0.99 (100 to 9900 bps)"
+      "name": "InvalidLegCount",
+      "msg": "Invalid leg count: must be between 2 and MAX_LEGS"
     },
     {
       "code": 6018,
-      "name": "InsufficientCollateral",
-      "msg": "Insufficient collateral: deposit must be ≥ max(x*, y*) to fully back pool reserves"
+      "name": "InvalidLegIndex",
+      "msg": "Invalid leg index: out of bounds for this group"
+    },
+    {
+      "code": 6019,
+      "name": "LegAlreadyAttached",
+      "msg": "Leg slot already attached"
+    },
+    {
+      "code": 6020,
+      "name": "LegMismatch",
+      "msg": "Leg market does not match the slot stored on the group"
+    },
+    {
+      "code": 6021,
+      "name": "GroupAlreadyResolved",
+      "msg": "Group market already resolved"
+    },
+    {
+      "code": 6022,
+      "name": "GroupNotResolved",
+      "msg": "Group market not yet resolved"
+    },
+    {
+      "code": 6023,
+      "name": "GroupNotExpired",
+      "msg": "Group market not yet expired"
+    },
+    {
+      "code": 6024,
+      "name": "GroupIncomplete",
+      "msg": "Group market has missing legs (must attach all N legs first)"
+    },
+    {
+      "code": 6025,
+      "name": "LegEndTsMismatch",
+      "msg": "Leg market end_ts does not match group end_ts"
+    },
+    {
+      "code": 6026,
+      "name": "LegMustCascadeResolve",
+      "msg": "Leg attached to a group must resolve via resolve_group_leg"
+    },
+    {
+      "code": 6027,
+      "name": "GroupCancelTooEarly",
+      "msg": "Group can only be cancelled after expiration"
     }
   ],
   "types": [
+    {
+      "name": "GroupMarket",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "group_id",
+            "type": "u64"
+          },
+          {
+            "name": "start_ts",
+            "type": "i64"
+          },
+          {
+            "name": "end_ts",
+            "type": "i64"
+          },
+          {
+            "name": "leg_count",
+            "docs": [
+              "Actual number of legs (≤ MAX_LEGS)."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "legs",
+            "docs": [
+              "Pubkeys of attached binary Market PDAs. Slots [0..leg_count) must be",
+              "populated before resolution. Pubkey::default() = empty slot."
+            ],
+            "type": {
+              "array": [
+                "pubkey",
+                32
+              ]
+            }
+          },
+          {
+            "name": "resolved",
+            "type": "bool"
+          },
+          {
+            "name": "winning_leg",
+            "docs": [
+              "Winning leg index (0..leg_count). NO_WINNING_LEG (0xFF) = unresolved."
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "Human-readable group name (UTF-8, zero-padded)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "total_seeded_bps",
+            "docs": [
+              "Cumulative bps seeded across all attached legs. Incremented by",
+              "`attach_leg_to_group`, checked by `resolve_group` so Σ p_i ≈ 1 at",
+              "settlement (paper invariant for categorical markets)."
+            ],
+            "type": "u32"
+          },
+          {
+            "name": "_reserved",
+            "docs": [
+              "Reserved for future expansion."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                28
+              ]
+            }
+          }
+        ]
+      }
+    },
     {
       "name": "LZeroSuggestion",
       "type": {
@@ -1208,14 +1358,6 @@
             "type": "pubkey"
           },
           {
-            "name": "pool_yes",
-            "type": "pubkey"
-          },
-          {
-            "name": "pool_no",
-            "type": "pubkey"
-          },
-          {
             "name": "start_ts",
             "type": "i64"
           },
@@ -1281,8 +1423,12 @@
             }
           },
           {
-            "name": "initial_price",
-            "type": "u128"
+            "name": "initial_price_bps",
+            "type": "u16"
+          },
+          {
+            "name": "group",
+            "type": "pubkey"
           }
         ]
       }
@@ -1302,14 +1448,25 @@
       }
     },
     {
-      "name": "YesNoDirection",
+      "name": "SwapDirection",
       "docs": [
-        "Direction of a YES↔NO swap on the pool. Sprint 20 collapses the 6 old",
-        "directions into 2 — USDC legs are now explicit via mint_pair / redeem_pair."
+        "Direction of a swap. Six combinations covering all USDC/YES/NO pairs."
       ],
       "type": {
         "kind": "enum",
         "variants": [
+          {
+            "name": "UsdcToYes"
+          },
+          {
+            "name": "UsdcToNo"
+          },
+          {
+            "name": "YesToUsdc"
+          },
+          {
+            "name": "NoToUsdc"
+          },
           {
             "name": "YesToNo"
           },

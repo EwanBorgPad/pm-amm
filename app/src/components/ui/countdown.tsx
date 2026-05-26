@@ -30,9 +30,5 @@ export function Countdown({ endTs, className }: CountdownProps) {
 
   const expired = text === "EXPIRED";
 
-  return (
-    <span className={`tnum ${expired ? "text-no" : ""} ${className ?? ""}`}>
-      {text}
-    </span>
-  );
+  return <span className={`tnum ${expired ? "text-no" : ""} ${className ?? ""}`}>{text}</span>;
 }

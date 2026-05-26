@@ -29,9 +29,7 @@ async function main() {
   anchor.setProvider(provider);
   const payer = (provider.wallet as any).payer;
 
-  const recipient = process.argv[2]
-    ? new PublicKey(process.argv[2])
-    : provider.wallet.publicKey;
+  const recipient = process.argv[2] ? new PublicKey(process.argv[2]) : provider.wallet.publicKey;
   const amount = process.argv[3] ? parseFloat(process.argv[3]) : 1000;
   const lamports = Math.floor(amount * 1e6);
 
@@ -43,12 +41,7 @@ async function main() {
     await getAccount(provider.connection, ata);
   } catch {
     console.log("Creating ATA...");
-    const ix = createAssociatedTokenAccountInstruction(
-      payer.publicKey,
-      ata,
-      recipient,
-      USDC_MINT
-    );
+    const ix = createAssociatedTokenAccountInstruction(payer.publicKey, ata, recipient, USDC_MINT);
     const tx = new anchor.web3.Transaction().add(ix);
     await provider.sendAndConfirm(tx);
   }
@@ -60,7 +53,7 @@ async function main() {
     USDC_MINT,
     ata,
     payer, // mint authority
-    lamports
+    lamports,
   );
 
   const acc = await getAccount(provider.connection, ata);

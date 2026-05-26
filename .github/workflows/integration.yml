@@ -1,0 +1,74 @@
+name: Integration tests
+
+# Anchor integration tests need a full build + local validator + ts-mocha,
+# which costs ~10 min of CI time. We run them on every push to main and via
+# manual dispatch — not on every PR — to keep PR feedback fast. PR authors
+# can request a run via "workflow_dispatch" when changes touch the program.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or commit to test"
+        required: false
+        default: ""
+
+jobs:
+  anchor-integration:
+    name: Anchor integration (localnet)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            anchor/target
+          key: ${{ runner.os }}-integration-${{ hashFiles('anchor/Cargo.lock') }}
+
+      - name: Install Solana toolchain
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.2.14/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install Anchor CLI (1.0.1)
+        run: |
+          cargo install --git https://github.com/coral-xyz/anchor --tag v1.0.1 anchor-cli --locked
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root deps
+        run: pnpm install
+
+      - name: Generate local wallet
+        run: |
+          mkdir -p ~/.config/solana
+          solana-keygen new --no-bip39-passphrase --silent --outfile ~/.config/solana/id.json
+
+      - name: Anchor build (with IDL regen)
+        working-directory: anchor
+        run: anchor build
+
+      - name: Anchor test (spawns localnet)
+        working-directory: anchor
+        # `anchor test` boots `solana-test-validator`, deploys the program, runs
+        # ts-mocha against tests/**/*.ts, then tears the validator down.
+        run: anchor test --skip-lint

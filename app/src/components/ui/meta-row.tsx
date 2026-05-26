@@ -5,12 +5,7 @@ interface MetaRowProps {
   className?: string;
 }
 
-export function MetaRow({
-  label,
-  value,
-  last = false,
-  className = "",
-}: MetaRowProps) {
+export function MetaRow({ label, value, last = false, className = "" }: MetaRowProps) {
   return (
     <div
       className={[

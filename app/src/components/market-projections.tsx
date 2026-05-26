@@ -20,7 +20,7 @@ export function MarketProjections({ market }: { market: MarketData }) {
     const pvMid = poolValue(market.price, midLEff);
 
     // At expiry (L_eff → 0, pool value → 0)
-    const dailyLvr = pvNow / (2 * remaining / 86400);
+    const dailyLvr = pvNow / ((2 * remaining) / 86400);
 
     return { pvNow, pvMid, dailyLvr, remaining, midRemaining };
   }, [market]);

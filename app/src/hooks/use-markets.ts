@@ -2,13 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { Program } from "@anchor-lang/core";
-import idl from "@/lib/pm_amm_idl.json";
-import { PROGRAM_ID } from "@/lib/constants";
 import { priceFromReserves, i80f48ToNumber } from "@/lib/pm-math";
+import { getReadOnlyProgram, decodeName } from "@/lib/program";
 
-const bnToNum = (bn: { toString(): string }): number =>
-  Number(BigInt(bn.toString()));
+const bnToNum = (bn: { toString(): string }): number => Number(BigInt(bn.toString()));
+
+/** System program address. Pubkey::default().toBase58() returns this string —
+ *  it indicates an unset Pubkey on-chain (Anchor's default value).
+ */
+const PUBKEY_DEFAULT = "11111111111111111111111111111111";
 
 export interface MarketData {
   publicKey: string;
@@ -27,6 +29,8 @@ export interface MarketData {
   lEff: number;
   cumYesPerShare: number;
   cumNoPerShare: number;
+  /** GroupMarket PDA this leg is attached to. "" if standalone. */
+  group: string;
 }
 
 export function useMarkets() {
@@ -35,14 +39,12 @@ export function useMarkets() {
   return useQuery<MarketData[]>({
     queryKey: ["markets"],
     queryFn: async () => {
-      const provider = { connection } as any;
-      const program = new Program(idl as any, provider);
-      // Filter by new Market account size (443 bytes) to skip old-layout accounts (379 bytes)
-      const accounts = await (program.account as any).market.all([
-        { dataSize: 443 },
-      ]);
+      const { accounts } = getReadOnlyProgram(connection);
+      // Filter by new Market account size (443 bytes) to skip old-layout
+      // accounts (379 bytes) left over from earlier devnet deploys.
+      const fetched = await accounts.market.all([{ dataSize: 443 }]);
 
-      return accounts.map((acc: any) => {
+      return fetched.map((acc) => {
         const m = acc.account;
         const now = Math.floor(Date.now() / 1000);
         const endTs = bnToNum(m.endTs);
@@ -53,18 +55,23 @@ export function useMarkets() {
         const x = i80f48ToNumber(m.reserveYes);
         const y = i80f48ToNumber(m.reserveNo);
 
+        // The on-chain reserves (x, y) reflect the pool state at last_accrual_ts.
+        // To display the *real* current price we must pair them with L_eff at
+        // that same timestamp — otherwise Φ((y-x)/L_eff(now)) under/overshoots
+        // mechanically whenever `accrue` hasn't been called recently, because
+        // L_eff decays with time but the reserves stay frozen between accruals.
+        const lastAccrualTs = bnToNum(m.lastAccrualTs);
+        const lEffAtLastAccrual = lZero * Math.sqrt(Math.max(endTs - lastAccrualTs, 1));
+
         let price: number;
         if (m.resolved) {
           price = m.winningSide === 1 ? 1 : m.winningSide === 2 ? 0 : 0.5;
         } else if (isExpired || (x === 0 && y === 0)) {
-          // Expired or reserves drained: use last accrual price from reserves ratio
-          // Compute price using full duration L_eff to get the "last real price"
-          const fullRemaining = Math.max(endTs - bnToNum(m.lastAccrualTs), 1);
-          const fullLEff = lZero * Math.sqrt(fullRemaining);
-          const xLast = i80f48ToNumber(m.reserveYes);
-          const yLast = i80f48ToNumber(m.reserveNo);
-          if (fullLEff > 0 && (xLast > 0 || yLast > 0)) {
-            price = Math.max(0.001, Math.min(0.999, priceFromReserves(xLast, yLast, fullLEff)));
+          // Expired or reserves drained: use last-accrual L_eff for the
+          // "last real price" (same logic, just narrower fallback for
+          // reserves=0 via cumulative residuals).
+          if (lEffAtLastAccrual > 0 && (x > 0 || y > 0)) {
+            price = Math.max(0.001, Math.min(0.999, priceFromReserves(x, y, lEffAtLastAccrual)));
           } else {
             // Reserves are 0 — use cumulative residuals ratio as proxy
             const cumYes = i80f48ToNumber(m.cumYesPerShare);
@@ -77,19 +84,23 @@ export function useMarkets() {
             }
           }
         } else {
-          price = lEff > 0 && (x > 0 || y > 0)
-            ? priceFromReserves(x, y, lEff)
-            : 0.5;
+          // Active market: real price uses lEffAtLastAccrual since reserves
+          // haven't been rebased since the last accrue.
+          price =
+            lEffAtLastAccrual > 0 && (x > 0 || y > 0)
+              ? priceFromReserves(x, y, lEffAtLastAccrual)
+              : 0.5;
         }
 
-        // Decode name: [u8; 64] → trim trailing zeros → UTF-8 string
-        const nameBytes: number[] = m.name ?? [];
-        const end = nameBytes.indexOf(0);
-        const nameStr = new TextDecoder().decode(
-          new Uint8Array(end >= 0 ? nameBytes.slice(0, end) : nameBytes)
-        );
+        // Decode name: [u8; 64] → trim trailing zeros → UTF-8 string.
+        const nameStr = decodeName(m.name);
 
         const marketId = bnToNum(m.marketId);
+        // Anchor exposes Pubkey::default() as the system program address
+        // ("111..."). Normalize that to "" so callers can test isAttached
+        // with a plain truthy check.
+        const groupRaw = m.group.toBase58();
+        const group = groupRaw === PUBKEY_DEFAULT ? "" : groupRaw;
         return {
           publicKey: acc.publicKey.toBase58(),
           marketId,
@@ -107,6 +118,7 @@ export function useMarkets() {
           lEff,
           cumYesPerShare: i80f48ToNumber(m.cumYesPerShare),
           cumNoPerShare: i80f48ToNumber(m.cumNoPerShare),
+          group,
         };
       });
     },

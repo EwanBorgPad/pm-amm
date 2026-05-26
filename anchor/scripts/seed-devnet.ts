@@ -1,17 +1,8 @@
 import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PmAmm } from "../target/types/pm_amm";
-import {
-  PublicKey,
-  SystemProgram,
-  ComputeBudgetProgram,
-} from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  createMint,
-  createAccount,
-  mintTo,
-} from "@solana/spl-token";
+import { PublicKey, SystemProgram, ComputeBudgetProgram } from "@solana/web3.js";
+import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo } from "@solana/spl-token";
 
 const YES_MINT_SEED = Buffer.from("yes_mint");
 const NO_MINT_SEED = Buffer.from("no_mint");
@@ -21,10 +12,16 @@ const LP_SEED = Buffer.from("lp");
 function deriveMarketPdas(marketId: anchor.BN, programId: PublicKey) {
   const [marketPda, marketBump] = PublicKey.findProgramAddressSync(
     [Buffer.from("market"), marketId.toArrayLike(Buffer, "le", 8)],
-    programId
+    programId,
   );
-  const [yesMint] = PublicKey.findProgramAddressSync([YES_MINT_SEED, marketPda.toBuffer()], programId);
-  const [noMint] = PublicKey.findProgramAddressSync([NO_MINT_SEED, marketPda.toBuffer()], programId);
+  const [yesMint] = PublicKey.findProgramAddressSync(
+    [YES_MINT_SEED, marketPda.toBuffer()],
+    programId,
+  );
+  const [noMint] = PublicKey.findProgramAddressSync(
+    [NO_MINT_SEED, marketPda.toBuffer()],
+    programId,
+  );
   const [vault] = PublicKey.findProgramAddressSync([VAULT_SEED, marketPda.toBuffer()], programId);
   return { marketPda, marketBump, yesMint, noMint, vault };
 }
@@ -77,7 +74,7 @@ async function main() {
   const m1UserNo = await createAccount(provider.connection, payer, market1Pdas.noMint, authority);
   const m1Lp = PublicKey.findProgramAddressSync(
     [LP_SEED, market1Pdas.marketPda.toBuffer(), authority.toBuffer()],
-    program.programId
+    program.programId,
   )[0];
 
   // Deposit 1000 USDC
@@ -141,7 +138,7 @@ async function main() {
   const m2UserNo = await createAccount(provider.connection, payer, market2Pdas.noMint, authority);
   const m2Lp = PublicKey.findProgramAddressSync(
     [LP_SEED, market2Pdas.marketPda.toBuffer(), authority.toBuffer()],
-    program.programId
+    program.programId,
   )[0];
 
   await program.methods
@@ -165,7 +162,9 @@ async function main() {
   console.log(`USDC Mint: ${collateralMint.toBase58()}`);
   console.log(`Market 1: ${market1Pdas.marketPda.toBase58()}`);
   console.log(`Market 2: ${market2Pdas.marketPda.toBase58()}`);
-  console.log(`\nExplorer: https://explorer.solana.com/address/${program.programId.toBase58()}?cluster=devnet`);
+  console.log(
+    `\nExplorer: https://explorer.solana.com/address/${program.programId.toBase58()}?cluster=devnet`,
+  );
 }
 
 main().catch(console.error);

@@ -9,16 +9,10 @@ e;
  */
 
 import * as anchor from "@anchor-lang/core";
-import {
-  PublicKey,
-  Transaction,
-  TransactionInstruction,
-} from "@solana/web3.js";
+import { PublicKey, Transaction, TransactionInstruction } from "@solana/web3.js";
 
 const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
-const TOKEN_METADATA_PROGRAM = new PublicKey(
-  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-);
+const TOKEN_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const URI =
   "https://raw.githubusercontent.com/Mattdgn/pm-amm/main/app/public/tokens/usdc-mock.json";
 
@@ -28,12 +22,8 @@ async function main() {
   const payer = (provider.wallet as any).payer;
 
   const [metadataPda] = PublicKey.findProgramAddressSync(
-    [
-      Buffer.from("metadata"),
-      TOKEN_METADATA_PROGRAM.toBuffer(),
-      USDC_MINT.toBuffer(),
-    ],
-    TOKEN_METADATA_PROGRAM
+    [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), USDC_MINT.toBuffer()],
+    TOKEN_METADATA_PROGRAM,
   );
 
   // UpdateMetadataAccountV2 discriminator = 15
@@ -56,7 +46,7 @@ async function main() {
       1 + // uses option (None)
       1 + // new_update_authority option (None)
       1 + // primary_sale_happened option (None)
-      1 // is_mutable option (None)
+      1, // is_mutable option (None)
   );
 
   let offset = 0;

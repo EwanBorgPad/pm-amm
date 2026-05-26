@@ -33,7 +33,7 @@ use anchor_lang::prelude::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj");
+declare_id!("Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK");
 
 #[program]
 pub mod pm_amm {
@@ -41,13 +41,17 @@ pub mod pm_amm {
 
     /// Create a new prediction market with YES/NO mints, a USDC vault,
     /// and Metaplex token metadata for wallet display.
+    ///
+    /// `initial_price_bps` seeds the YES price at first deposit. Pass `0` for
+    /// the legacy 50/50 default. For multi-outcome groups, pass `10_000 / N`.
     pub fn initialize_market(
         ctx: Context<InitializeMarket>,
         market_id: u64,
         end_ts: i64,
         name: String,
+        initial_price_bps: u16,
     ) -> Result<()> {
-        instructions::initialize_market::handler(ctx, market_id, end_ts, name)
+        instructions::initialize_market::handler(ctx, market_id, end_ts, name, initial_price_bps)
     }
 
     /// Deposit USDC as liquidity. First deposit bootstraps L_0 at 50/50 price.
@@ -110,5 +114,51 @@ pub mod pm_amm {
     /// Only callable post-resolution. Burns both sides atomically.
     pub fn claim_winnings(ctx: Context<ClaimWinnings>, amount: u64) -> Result<()> {
         instructions::claim_winnings::handler(ctx, amount)
+    }
+
+    // ========================================================================
+    // Multi-outcome group market (EXTENSION over the Paradigm paper)
+    // ========================================================================
+
+    /// Create a GroupMarket wrapping `leg_count` binary markets as a
+    /// categorical (multi-outcome) prediction market. Legs are attached
+    /// separately via `attach_leg_to_group` and must each be seeded at
+    /// `10_000 / leg_count` bps so Σ p_i = 1 at open.
+    pub fn initialize_group_market(
+        ctx: Context<InitializeGroupMarket>,
+        group_id: u64,
+        end_ts: i64,
+        name: String,
+        leg_count: u8,
+    ) -> Result<()> {
+        instructions::group::initialize_group_market::handler(
+            ctx, group_id, end_ts, name, leg_count,
+        )
+    }
+
+    /// Attach an existing binary Market PDA to a leg slot of a GroupMarket.
+    /// Enforces same authority, same end_ts, and seed price = 10_000/N bps.
+    pub fn attach_leg_to_group(ctx: Context<AttachLegToGroup>, leg_index: u8) -> Result<()> {
+        instructions::group::attach_leg_to_group::handler(ctx, leg_index)
+    }
+
+    /// Resolve a GroupMarket: authority picks the winning leg.
+    /// Must run after expiration and after all legs are attached.
+    pub fn resolve_group(ctx: Context<ResolveGroup>, winning_leg: u8) -> Result<()> {
+        instructions::group::resolve_group::handler(ctx, winning_leg)
+    }
+
+    /// Cascade-resolve one leg of a resolved GroupMarket. Permissionless:
+    /// the group's `winning_leg` is the source of truth (winning → Yes,
+    /// all others → No).
+    pub fn resolve_group_leg(ctx: Context<ResolveGroupLeg>, leg_index: u8) -> Result<()> {
+        instructions::group::resolve_group_leg::handler(ctx, leg_index)
+    }
+
+    /// Cancel an abandoned GroupMarket past expiration. Marks it resolved with
+    /// `NO_WINNING_LEG`, so attached legs can then be finalized as `Side::No`
+    /// via `resolve_group_leg`. Authority-only.
+    pub fn cancel_group_market(ctx: Context<CancelGroupMarket>) -> Result<()> {
+        instructions::group::cancel_group_market::handler(ctx)
     }
 }
