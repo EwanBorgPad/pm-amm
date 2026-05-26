@@ -39,12 +39,21 @@ pub fn handler(
 
     /// Minimum market duration in seconds (5 minutes).
     const MIN_DURATION_SECS: i64 = 300;
+    /// Maximum market duration in seconds (~50 years). Bounded to prevent
+    /// indefinite fund lockup if the authority disappears before resolving.
+    /// Must match the cap in `initialize_market` so a group can host any
+    /// binary leg created via the standard path.
+    const MAX_DURATION_SECS: i64 = 50 * 365 * 24 * 60 * 60;
     /// Minimum number of legs — a 2-leg group is effectively a binary market,
     /// but we allow it for API uniformity.
     const MIN_LEG_COUNT: u8 = 2;
 
     require!(
         end_ts > now + MIN_DURATION_SECS,
+        PmAmmError::InvalidDuration
+    );
+    require!(
+        end_ts <= now.saturating_add(MAX_DURATION_SECS),
         PmAmmError::InvalidDuration
     );
     require!(

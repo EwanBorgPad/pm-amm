@@ -106,12 +106,19 @@ pub fn handler(
 
     /// Minimum market duration in seconds (5 minutes).
     const MIN_DURATION_SECS: i64 = 300;
+    /// Maximum market duration in seconds (~50 years). Bounded to prevent
+    /// indefinite fund lockup if the authority disappears before resolving.
+    const MAX_DURATION_SECS: i64 = 50 * 365 * 24 * 60 * 60;
     /// Permitted explicit initial price range (1% to 99% in basis points).
     const MIN_INIT_PRICE_BPS: u16 = 100;
     const MAX_INIT_PRICE_BPS: u16 = 9900;
 
     require!(
         end_ts > now + MIN_DURATION_SECS,
+        PmAmmError::InvalidDuration
+    );
+    require!(
+        end_ts <= now.saturating_add(MAX_DURATION_SECS),
         PmAmmError::InvalidDuration
     );
     require!(

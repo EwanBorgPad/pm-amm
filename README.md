@@ -72,34 +72,37 @@ pm-amm/
       state.rs           # Market, LpPosition structs
       errors.rs          # Error codes
       instructions/      # 11 instructions (fully-backed architecture, Sprint 20)
-    tests/               # 18 TS integration tests
+    tests/               # 46 TS integration tests (pm_amm + group_market + access_control)
     scripts/             # Deploy + seed scripts
-  app/                   # Next.js frontend
+  app/                   # Next.js frontend (with /create-group and /group/[id] pages)
   oracle/                # Python truth oracle (scipy reference)
   doc/                   # Paper reference, PRD, sprint definitions
+  scripts/               # check_idl_coherence.py (CI guard against IDL drift)
 ```
 
-### 11 Instructions
+### 15 Instructions (10 binary + 5 group-market EXTENSION)
 
 | Instruction | Who | Description |
 |---|---|---|
-| `initialize_market` | Anyone | Create market with YES/NO mints, USDC vault, pool ATAs |
-| `deposit_liquidity` | LP | Add USDC, get shares. Bootstraps L_0 on first deposit |
-| `mint_pair` | Anyone | Burn 1 USDC → mint 1 YES + 1 NO (Sprint 20, fully-backed) |
-| `redeem_pair` | Holder | Burn 1 YES + 1 NO → 1 USDC |
-| `swap_yes_no` | Trader | Pure YES↔NO swap on the pm-AMM curve (2 directions) |
+| `initialize_market` | Anyone | Create market with YES/NO mints + USDC vault. `initial_price_bps` (`[100, 9900]`, `0` = legacy 50/50) seeds the YES price at first deposit |
+| `deposit_liquidity` | LP | Add USDC, get shares. First deposit bootstraps `L_0` at the configured seed price |
+| `swap` | Trader | 6 directions: USDC ↔ YES, USDC ↔ NO, YES ↔ NO |
 | `withdraw_liquidity` | LP | Burn shares, receive YES+NO proportional |
 | `accrue` | Anyone | Permissionless dC_t accrual (keeper) |
 | `claim_lp_residuals` | LP | Claim accrued YES+NO tokens |
-| `resolve_market` | Authority | Set winning side after expiration |
+| `redeem_pair` | Holder | Burn 1 YES + 1 NO → 1 USDC |
+| `resolve_market` | Authority | Set winning side after expiration. Rejects legs attached to a group (cascade only) |
 | `claim_winnings` | Holder | Burn winning tokens for 1 USDC each |
 | `suggest_l_zero` | Anyone | View: compute optimal L_0 for a budget |
+| `initialize_group_market` | Anyone | **EXTENSION**: create a categorical market with N legs |
+| `attach_leg_to_group` | Group auth | Bind a binary market as leg at `10_000 / N` bps (±1 tolerance) |
+| `resolve_group` | Group auth | Pick the winning leg after expiration; enforces Σ p_i ≈ 1 |
+| `resolve_group_leg` | Anyone | Cascade-resolve one leg of a resolved group (winning → Yes, others → No) |
+| `cancel_group_market` | Group auth | Mark an abandoned group resolved with `NO_WINNING_LEG` — legs cascade to `Side::No` |
 
-**USDC ↔ YES/NO trades** are built client-side as atomic instruction combos:
-- **BUY YES/NO** = `mint_pair(δ)` + `swap_yes_no` (dump the unwanted side)
-- **SELL YES/NO** = `swap_yes_no` (rebalance to a pair) + `redeem_pair(δ)`
+**Conservation invariant**: by construction of the pm-AMM curve + dC_t mechanism, `vault.usdc ≥ max(yes_supply, no_supply)` at all `t` — winners can always be paid 1 USDC per winning token. The `.min(vault.amount)` in `claim_winnings` is defensive code for a case the math forbids.
 
-**Conservation invariant (Sprint 20)**: `vault.usdc == yes_mint.supply == no_mint.supply` at all times. Fully-backed outcome tokens, Polymarket-style — no structural rug possible.
+> Upstream `main` documents a fully-backed Sprint 20 architecture (`mint_pair` + `swap_yes_no` with `vault.usdc == yes_mint.supply == no_mint.supply`). The Rust source for that variant isn't published yet; this fork ports multi-outcome onto the public Sprint 17 swap-based code. When Matt publishes Sprint 20, a follow-up sprint can adapt leg seeding to use `mint_pair` instead of `swap`.
 
 ---
 
@@ -149,20 +152,22 @@ The Anchor IDL is available at [`idl/pm_amm.json`](idl/pm_amm.json) for integrat
 
 ## Test Suite
 
-**216 tests total:**
+**242 tests total:**
 
 | Category | Count | Coverage |
 |---|---|---|
-| Rust unit tests (pm_math, accrual, state) | 62 | All math functions, Q64.64 roundtrips, accrual properties, solver precision |
-| TS integration tests | 18 | Full lifecycle: init -> deposit -> mint_pair -> swap_yes_no -> claim -> resolve |
+| Rust unit tests (`pm_math`, `accrual`, `state`, group) | 60 | All math functions, Q64.64 roundtrips, accrual properties, solver precision, group invariants, `min_sum` formula proof |
+| TS integration — `pm_amm.ts` | 18 | Full lifecycle binary: init → deposit → swap → claim → resolve |
+| TS integration — `group_market.ts` | 22 | 5 group instructions: happy paths + every reachable error code on localnet, including `total_seeded_bps` overflow and underseed |
+| TS integration — `access_control.ts` | 6 | Permissionless paths (accrue, redeem) + signer-bound LpPosition checks |
 | Python property tests | 24 | Paradigm properties A/B/C, robustness D/E/F, initial-price G |
 | Python oracle tests | 112 | Cross-validation against scipy |
 
 Run with:
 
 ```bash
-pnpm run test:rust   # Rust unit (62)
-pnpm run test        # TS integration on localnet (18)
+pnpm run test:rust   # Rust unit (60)
+pnpm run test        # TS integration on localnet (46 — boots surfpool with Metaplex cloned from devnet)
 pnpm run test:all    # Rust + Python (skips TS)
 python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (136)
 ```
@@ -171,14 +176,20 @@ python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (13
 
 ## Known Limitations
 
-- **Oracle**: admin-only resolution (no oracle integration)
-- **Binary only**: YES/NO outcomes, no multi-outcome
+- **Oracle**: admin-only resolution (no oracle integration). For mainnet, replace with
+  Pyth/Switchboard or a multisig with appeal timelock.
+- **Multi-outcome rebalancing**: Σ p_i = 1 is enforced on-chain at seed and at resolution; keeping
+  it tight *between* trades is left to an off-chain dispatcher (Vyber pattern).
 - **0% fees**: no trading fees (pure LVR model)
+- **Single-key upgrade authority**: not mainnet-grade. Move to a Squads multisig before any
+  production deployment.
 
 ## Roadmap
 
+- [x] Multi-outcome markets (categorical pm-AMM, composed of N binary legs — Sprint 21)
+- [ ] Adopt Matt's Sprint 20 fully-backed model (`mint_pair` + `swap_yes_no`) once the Rust source is published upstream
+- [ ] On-chain dispatcher for atomic inter-leg Σ p_i rebalancing
 - [ ] Oracle integration (Switchboard/Pyth for auto-resolution)
-- [ ] Multi-outcome markets (categorical pm-AMM)
 - [ ] Trading fees (LP incentive beyond dC_t)
 - [ ] Delta hedging tools for sophisticated LPs
 

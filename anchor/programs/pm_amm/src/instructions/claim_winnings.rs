@@ -75,7 +75,19 @@ pub fn handler(ctx: Context<ClaimWinnings>, _amount: u64) -> Result<()> {
         None => return err!(PmAmmError::MarketNotResolved),
     };
 
-    let payout = winning_balance.min(ctx.accounts.vault.amount);
+    // Hard solvency guard: revert if the vault cannot pay the full winning
+    // balance. The pm-AMM invariant should guarantee `vault >= winning_supply`
+    // at resolution, but accumulated u64 truncation across many swaps could
+    // in theory leave a shortfall. Failing loudly here is strictly better
+    // than the previous `min(winning, vault)` which silently burned the
+    // user's tokens for less USDC than they were owed. Operationally, if
+    // this ever fires, it signals a bug or invariant break that needs to
+    // be diagnosed before any more claims run.
+    require!(
+        ctx.accounts.vault.amount >= winning_balance,
+        PmAmmError::InsufficientVault
+    );
+    let payout = winning_balance;
 
     let market_id_bytes = market.market_id.to_le_bytes();
     let bump = market.bump;
