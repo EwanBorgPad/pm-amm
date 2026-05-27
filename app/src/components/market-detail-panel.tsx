@@ -37,9 +37,19 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
 
   const lpPnl = hasLp
     ? lpPositionPnl(
-        lp.shares, market.totalLpShares, lp.collateralDeposited, market.price, market.lEff,
-        market.cumYesPerShare, market.cumNoPerShare, lp.yesCheckpoint, lp.noCheckpoint,
-        tokens?.yes ?? 0, tokens?.no ?? 0, market.reserveYes, market.reserveNo,
+        lp.shares,
+        market.totalLpShares,
+        lp.collateralDeposited,
+        market.price,
+        market.lEff,
+        market.cumYesPerShare,
+        market.cumNoPerShare,
+        lp.yesCheckpoint,
+        lp.noCheckpoint,
+        tokens?.yes ?? 0,
+        tokens?.no ?? 0,
+        market.reserveYes,
+        market.reserveNo,
       )
     : null;
 
@@ -100,26 +110,31 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
               </div>
             )}
           </div>
-          {posValue && !posValue.error && (() => {
-            const sellNow = posValue.totalUsdc;
-            const yesAmt = tokens?.yes ?? 0;
-            const noAmt = tokens?.no ?? 0;
-            // If user holds YES: payout if YES wins = yesAmt (each = 1 USDC)
-            // If user holds NO: payout if NO wins = noAmt
-            const payout = yesAmt > noAmt ? yesAmt : noAmt;
-            const side = yesAmt > noAmt ? "YES" : "NO";
-            const returnPct = sellNow > 0 ? ((payout - sellNow) / sellNow) * 100 : 0;
-            return (
-              <>
-                <MetaRow label={`If ${side} wins`} value={
-                  <span className="text-yes">
-                    {formatUsdc(payout)} USDC (+{returnPct.toFixed(0)}%)
-                  </span>
-                } />
-                <MetaRow label="Sell now" value={`${formatUsdc(sellNow)} USDC`} last />
-              </>
-            );
-          })()}
+          {posValue &&
+            !posValue.error &&
+            (() => {
+              const sellNow = posValue.totalUsdc;
+              const yesAmt = tokens?.yes ?? 0;
+              const noAmt = tokens?.no ?? 0;
+              // If user holds YES: payout if YES wins = yesAmt (each = 1 USDC)
+              // If user holds NO: payout if NO wins = noAmt
+              const payout = yesAmt > noAmt ? yesAmt : noAmt;
+              const side = yesAmt > noAmt ? "YES" : "NO";
+              const returnPct = sellNow > 0 ? ((payout - sellNow) / sellNow) * 100 : 0;
+              return (
+                <>
+                  <MetaRow
+                    label={`If ${side} wins`}
+                    value={
+                      <span className="text-yes">
+                        {formatUsdc(payout)} USDC (+{returnPct.toFixed(0)}%)
+                      </span>
+                    }
+                  />
+                  <MetaRow label="Sell now" value={`${formatUsdc(sellNow)} USDC`} last />
+                </>
+              );
+            })()}
         </>
       )}
 
@@ -131,25 +146,35 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
           </div>
           <MetaRow label="Deposited" value={`$${formatUsdc(lp.collateralDeposited)}`} />
           <MetaRow label="Pool share" value={`${lpPnl?.poolSharePct.toFixed(1)}%`} />
-          {lpPnl && (() => {
-            const dep = lp.collateralDeposited;
-            const yesPnl = ((lpPnl.ifYesWins - dep) / dep * 100);
-            const noPnl = ((lpPnl.ifNoWins - dep) / dep * 100);
-            return (
-              <>
-                <MetaRow label="If YES wins" value={
-                  <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
-                    ${formatUsdc(lpPnl.ifYesWins)} ({yesPnl >= 0 ? "+" : ""}{yesPnl.toFixed(0)}%)
-                  </span>
-                } />
-                <MetaRow label="If NO wins" value={
-                  <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
-                    ${formatUsdc(lpPnl.ifNoWins)} ({noPnl >= 0 ? "+" : ""}{noPnl.toFixed(0)}%)
-                  </span>
-                } last />
-              </>
-            );
-          })()}
+          {lpPnl &&
+            (() => {
+              const dep = lp.collateralDeposited;
+              const yesPnl = ((lpPnl.ifYesWins - dep) / dep) * 100;
+              const noPnl = ((lpPnl.ifNoWins - dep) / dep) * 100;
+              return (
+                <>
+                  <MetaRow
+                    label="If YES wins"
+                    value={
+                      <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
+                        ${formatUsdc(lpPnl.ifYesWins)} ({yesPnl >= 0 ? "+" : ""}
+                        {yesPnl.toFixed(0)}%)
+                      </span>
+                    }
+                  />
+                  <MetaRow
+                    label="If NO wins"
+                    value={
+                      <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
+                        ${formatUsdc(lpPnl.ifNoWins)} ({noPnl >= 0 ? "+" : ""}
+                        {noPnl.toFixed(0)}%)
+                      </span>
+                    }
+                    last
+                  />
+                </>
+              );
+            })()}
           <Link
             href={`/market/${market.marketId}/lp`}
             className="block mt-[6px] text-center text-[11px] text-accent hover:text-text-hi transition-all duration-[120ms]"

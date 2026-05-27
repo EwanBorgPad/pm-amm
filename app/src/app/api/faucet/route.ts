@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server";
-import {
-  Connection,
-  Keypair,
-  PublicKey,
-  Transaction,
-} from "@solana/web3.js";
+import { Connection, Keypair, PublicKey, Transaction } from "@solana/web3.js";
 import {
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
   createMintToInstruction,
 } from "@solana/spl-token";
 
-const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
 const AMOUNT = 1000_000_000; // 1000 mUSDC
 
 export async function POST(req: Request) {
   const keyB64 = process.env.MINT_AUTHORITY_KEY;
   const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
+  // Read the USDC mint from env so the faucet matches the fork's deployment.
+  // Falls back to Matt's devnet mint if the env var is unset, for back-compat.
+  const usdcMintStr =
+    process.env.NEXT_PUBLIC_USDC_MINT || "8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A";
+  const USDC_MINT = new PublicKey(usdcMintStr);
 
   if (!keyB64) {
     return NextResponse.json({ error: "Faucet not configured" }, { status: 503 });
@@ -39,7 +38,7 @@ export async function POST(req: Request) {
     const ataInfo = await connection.getAccountInfo(ata);
     if (!ataInfo) {
       tx.add(
-        createAssociatedTokenAccountInstruction(authority.publicKey, ata, recipient, USDC_MINT)
+        createAssociatedTokenAccountInstruction(authority.publicKey, ata, recipient, USDC_MINT),
       );
     }
 

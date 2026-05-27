@@ -1,10 +1,7 @@
 "use client";
 
 import { ReactNode, useMemo } from "react";
-import {
-  ConnectionProvider,
-  WalletProvider,
-} from "@solana/wallet-adapter-react";
+import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { RPC_URL } from "@/lib/constants";
 

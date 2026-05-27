@@ -2,7 +2,7 @@
   "name": "pm-amm",
   "private": true,
   "scripts": {
-    "build": "cd anchor && anchor build --no-idl -- --tools-version v1.52 && anchor idl build -o target/idl/pm_amm.json",
+    "build": "cd anchor && anchor build --no-idl --ignore-keys && anchor idl build -o target/idl/pm_amm.json",
     "test": "cd anchor && anchor test",
     "test:rust": "cd anchor && cargo test --package pm_amm",
     "dev": "cd app && pnpm dev",

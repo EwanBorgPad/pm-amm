@@ -1,5 +1,13 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builders use `(program.methods as any).fooBar(...)`
+ * because the generated IDL types (target/types/pm_amm.ts) lag the on-chain
+ * struct between `anchor build` runs. The runtime IDL JSON is authoritative;
+ * call sites match it 1:1 — see /Users/ewanhamon/Documents/Code/BorgPad/pm-amm/app/src/lib/program.ts for the
+ * read-only typed namespace used by hooks that only fetch accounts.
+ */
+
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Button } from "@/components/ui/button";
@@ -9,7 +17,12 @@ import { useProgram } from "@/hooks/use-program";
 import { useLpPosition } from "@/hooks/use-lp-position";
 import { formatUsdc } from "@/lib/pm-math";
 import type { MarketData } from "@/hooks/use-markets";
-import { PublicKey, ComputeBudgetProgram, SystemProgram, type TransactionInstruction } from "@solana/web3.js";
+import {
+  PublicKey,
+  ComputeBudgetProgram,
+  SystemProgram,
+  type TransactionInstruction,
+} from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
@@ -41,9 +54,14 @@ export function LpPanel({ market }: { market: MarketData }) {
       const tx = await (program.methods as any)
         .depositLiquidity(new BN(lamports))
         .accounts({
-          signer: publicKey, market: marketPda, collateralMint: USDC_MINT,
-          vault: vaultPda, userCollateral: userUsdc, lpPosition: lpPda,
-          systemProgram: SystemProgram.programId, tokenProgram: TOKEN_PROGRAM_ID,
+          signer: publicKey,
+          market: marketPda,
+          collateralMint: USDC_MINT,
+          vault: vaultPda,
+          userCollateral: userUsdc,
+          lpPosition: lpPda,
+          systemProgram: SystemProgram.programId,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
         .rpc();
@@ -53,7 +71,11 @@ export function LpPanel({ market }: { market: MarketData }) {
       setDepositAmt("");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("WalletSign") || msg.includes("User rejected")) { toast.info("Transaction cancelled"); setLoading(false); return; }
+      if (msg.includes("WalletSign") || msg.includes("User rejected")) {
+        toast.info("Transaction cancelled");
+        setLoading(false);
+        return;
+      }
       toast.error("Deposit failed", { description: msg.slice(0, 120) });
     } finally {
       setLoading(false);
@@ -72,19 +94,32 @@ export function LpPanel({ market }: { market: MarketData }) {
 
       // Ensure YES/NO ATAs exist (may have been closed after a sell)
       const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
-      for (const [ata, mint] of [[userYes, yesMint], [userNo, noMint]] as [PublicKey, PublicKey][]) {
-        try { await getAccount(conn, ata); } catch {
+      const preIxs: TransactionInstruction[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ];
+      for (const [ata, mint] of [
+        [userYes, yesMint],
+        [userNo, noMint],
+      ] as [PublicKey, PublicKey][]) {
+        try {
+          await getAccount(conn, ata);
+        } catch {
           preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
         }
       }
 
-      const sharesBn = new BN((BigInt(Math.floor(lp.shares * 2 ** 48))).toString());
+      const sharesBn = new BN(BigInt(Math.floor(lp.shares * 2 ** 48)).toString());
       const tx = await (program.methods as any)
         .withdrawLiquidity(sharesBn)
         .accounts({
-          signer: publicKey, market: marketPda, collateralMint: USDC_MINT,
-          yesMint: yesMint, noMint: noMint, lpPosition: lpPda, userYes: userYes, userNo: userNo,
+          signer: publicKey,
+          market: marketPda,
+          collateralMint: USDC_MINT,
+          yesMint: yesMint,
+          noMint: noMint,
+          lpPosition: lpPda,
+          userYes: userYes,
+          userNo: userNo,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions(preIxs)
@@ -94,7 +129,11 @@ export function LpPanel({ market }: { market: MarketData }) {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("WalletSign") || msg.includes("User rejected")) { toast.info("Transaction cancelled"); setLoading(false); return; }
+      if (msg.includes("WalletSign") || msg.includes("User rejected")) {
+        toast.info("Transaction cancelled");
+        setLoading(false);
+        return;
+      }
       toast.error("Withdraw failed", { description: msg.slice(0, 120) });
     } finally {
       setLoading(false);
@@ -112,25 +151,27 @@ export function LpPanel({ market }: { market: MarketData }) {
         </div>
       )}
 
-      {!market.resolved && <div className="flex gap-[8px]">
-        <AmountInput
-          placeholder="0.00"
-          value={depositAmt}
-          onChange={(e) => setDepositAmt(e.target.value)}
-          type="number"
-          min="0.001"
-          step="0.01"
-          className="flex-1"
-        />
-        <Button
-          variant="secondary"
-          onClick={handleDeposit}
-          disabled={!publicKey || !depositAmt || loading}
-          className="shrink-0"
-        >
-          {loading ? "..." : "Deposit"}
-        </Button>
-      </div>}
+      {!market.resolved && (
+        <div className="flex gap-[8px]">
+          <AmountInput
+            placeholder="0.00"
+            value={depositAmt}
+            onChange={(e) => setDepositAmt(e.target.value)}
+            type="number"
+            min="0.001"
+            step="0.01"
+            className="flex-1"
+          />
+          <Button
+            variant="secondary"
+            onClick={handleDeposit}
+            disabled={!publicKey || !depositAmt || loading}
+            className="shrink-0"
+          >
+            {loading ? "..." : "Deposit"}
+          </Button>
+        </div>
+      )}
 
       {lp && lp.shares > 0 && (
         <Button variant="secondary" className="w-full" onClick={handleWithdraw} disabled={loading}>

@@ -1,21 +1,25 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builders use `(program.methods as any)` because the
+ * generated IDL TS types lag the on-chain struct between `anchor build` runs.
+ * Read-only paths use the typed namespace from `@/lib/program`.
+ */
+
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey, ComputeBudgetProgram } from "@solana/web3.js";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
-import { MetaRow } from "@/components/ui/meta-row";
 import { Figure } from "@/components/ui/figure";
 import { Button } from "@/components/ui/button";
 import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useUserTokens } from "@/hooks/use-user-tokens";
-import { useLpPosition, type LpPositionData } from "@/hooks/use-lp-position";
+import { useLpPosition } from "@/hooks/use-lp-position";
 import { useProgram } from "@/hooks/use-program";
 import { formatUsdc, lpPositionPnl } from "@/lib/pm-math";
 import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
 import { deriveYesMint, deriveNoMint } from "@/lib/pda";
-import { BN } from "@anchor-lang/core";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -51,11 +55,18 @@ function TradePosition({ market }: { market: MarketData }) {
   if (yesAmt === 0 && noAmt === 0) return null;
 
   const estValue = market.resolved
-    ? (market.winningSide === 1 ? yesAmt : market.winningSide === 2 ? noAmt : 0)
+    ? market.winningSide === 1
+      ? yesAmt
+      : market.winningSide === 2
+        ? noAmt
+        : 0
     : yesAmt * market.price + noAmt * (1 - market.price);
 
   return (
-    <Link href={`/market/${market.marketId}`} className="block border-b border-line py-[10px] hover:bg-surface transition-all duration-[120ms] -mx-[4px] px-[4px]">
+    <Link
+      href={`/market/${market.marketId}`}
+      className="block border-b border-line py-[10px] hover:bg-surface transition-all duration-[120ms] -mx-[4px] px-[4px]"
+    >
       <div className="flex justify-between items-baseline mb-[4px]">
         <span className="font-sans text-[12px] text-text-hi truncate mr-[8px]">{market.name}</span>
         <span className="text-[11px] tnum text-text-dim shrink-0">~{formatUsdc(estValue)}</span>
@@ -77,17 +88,31 @@ function LpPositionRow({ market }: { market: MarketData }) {
   if (!lp || lp.shares <= 0) return null;
 
   const pos = lpPositionPnl(
-    lp.shares, market.totalLpShares, lp.collateralDeposited, market.price, market.lEff,
-    market.cumYesPerShare, market.cumNoPerShare, lp.yesCheckpoint, lp.noCheckpoint,
-    lpTokens?.yes ?? 0, lpTokens?.no ?? 0, market.reserveYes, market.reserveNo,
+    lp.shares,
+    market.totalLpShares,
+    lp.collateralDeposited,
+    market.price,
+    market.lEff,
+    market.cumYesPerShare,
+    market.cumNoPerShare,
+    lp.yesCheckpoint,
+    lp.noCheckpoint,
+    lpTokens?.yes ?? 0,
+    lpTokens?.no ?? 0,
+    market.reserveYes,
+    market.reserveNo,
   );
 
   return (
-    <Link href={`/market/${market.marketId}/lp`} className="block border-b border-line py-[10px] hover:bg-surface transition-all duration-[120ms] -mx-[4px] px-[4px]">
+    <Link
+      href={`/market/${market.marketId}/lp`}
+      className="block border-b border-line py-[10px] hover:bg-surface transition-all duration-[120ms] -mx-[4px] px-[4px]"
+    >
       <div className="flex justify-between items-baseline mb-[4px]">
         <span className="font-sans text-[12px] text-text-hi truncate mr-[8px]">{market.name}</span>
         <span className={`text-[11px] tnum shrink-0 ${pos.pnl >= 0 ? "text-yes" : "text-no"}`}>
-          {pos.pnl >= 0 ? "+" : ""}{formatUsdc(Math.abs(pos.pnl))}
+          {pos.pnl >= 0 ? "+" : ""}
+          {formatUsdc(Math.abs(pos.pnl))}
         </span>
       </div>
       <div className="flex gap-[12px] text-[10px] text-muted">
@@ -143,10 +168,20 @@ function ResolvableMarket({ market }: { market: MarketData }) {
     <div className="border-b border-line py-[10px]">
       <div className="font-sans text-[12px] text-text-hi truncate mb-[6px]">{market.name}</div>
       <div className="flex gap-[6px]">
-        <Button variant="yes" className="flex-1 text-[10px] py-[4px]" onClick={() => handleResolve("yes")} disabled={loading}>
+        <Button
+          variant="yes"
+          className="flex-1 text-[10px] py-[4px]"
+          onClick={() => handleResolve("yes")}
+          disabled={loading}
+        >
           YES
         </Button>
-        <Button variant="no" className="flex-1 text-[10px] py-[4px]" onClick={() => handleResolve("no")} disabled={loading}>
+        <Button
+          variant="no"
+          className="flex-1 text-[10px] py-[4px]"
+          onClick={() => handleResolve("no")}
+          disabled={loading}
+        >
           NO
         </Button>
       </div>
@@ -162,17 +197,15 @@ export function PortfolioPanel() {
   if (!publicKey) {
     return (
       <aside className="border-l border-line p-[20px] hidden xl:flex items-center justify-center">
-        <span className="text-muted font-mono text-[11px] tracking-[0.03em]">
-          CONNECT WALLET
-        </span>
+        <span className="text-muted font-mono text-[11px] tracking-[0.03em]">CONNECT WALLET</span>
       </aside>
     );
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const resolvable = markets?.filter(
-    (m) => !m.resolved && now >= m.endTs && m.authority === publicKey.toBase58()
-  ) ?? [];
+  const resolvable =
+    markets?.filter((m) => !m.resolved && now >= m.endTs && m.authority === publicKey.toBase58()) ??
+    [];
 
   return (
     <aside className="border-l border-line p-[16px] font-mono text-[12px] hidden xl:block overflow-y-auto">
@@ -180,12 +213,7 @@ export function PortfolioPanel() {
         PORTFOLIO
       </div>
 
-      <Figure
-        label="USDC"
-        value={formatUsdc(usdcBalance ?? 0)}
-        size="data"
-        color="default"
-      />
+      <Figure label="USDC" value={formatUsdc(usdcBalance ?? 0)} size="data" color="default" />
 
       {/* Resolve actions */}
       {resolvable.length > 0 && (

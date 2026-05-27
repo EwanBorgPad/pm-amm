@@ -17,7 +17,7 @@ export interface UserTokens {
 export function useUserTokens(
   yesMint: string | undefined,
   noMint: string | undefined,
-  usdcMint: string | undefined
+  usdcMint: string | undefined,
 ) {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
@@ -29,10 +29,7 @@ export function useUserTokens(
 
       async function getBalance(mint: string): Promise<[number, string]> {
         try {
-          const ata = await getAssociatedTokenAddress(
-            new PublicKey(mint),
-            publicKey!
-          );
+          const ata = await getAssociatedTokenAddress(new PublicKey(mint), publicKey!);
           const acc = await getAccount(connection, ata);
           return [Number(acc.amount), ata.toBase58()];
         } catch {

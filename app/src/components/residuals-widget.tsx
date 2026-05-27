@@ -1,5 +1,11 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builders use `(program.methods as any)` because the
+ * generated IDL TS types lag the on-chain struct between `anchor build` runs.
+ * Read-only paths use the typed namespace from `@/lib/program`.
+ */
+
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Button } from "@/components/ui/button";
@@ -37,9 +43,16 @@ export function ResidualsWidget({ market }: { market: MarketData }) {
       const lpPda = deriveLpPosition(marketPda, publicKey);
       // Ensure YES+NO ATAs exist (may have been closed after a sell)
       const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })];
-      for (const [ata, mint] of [[userYes, yesMint], [userNo, noMint]] as [PublicKey, PublicKey][]) {
-        try { await getAccount(conn, ata); } catch {
+      const preIxs: TransactionInstruction[] = [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
+      ];
+      for (const [ata, mint] of [
+        [userYes, yesMint],
+        [userNo, noMint],
+      ] as [PublicKey, PublicKey][]) {
+        try {
+          await getAccount(conn, ata);
+        } catch {
           preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
         }
       }
@@ -47,8 +60,14 @@ export function ResidualsWidget({ market }: { market: MarketData }) {
       const tx = await (program.methods as any)
         .claimLpResiduals()
         .accounts({
-          signer: publicKey, market: marketPda, yesMint: yesMint, noMint: noMint,
-          lpPosition: lpPda, userYes: userYes, userNo: userNo, tokenProgram: TOKEN_PROGRAM_ID,
+          signer: publicKey,
+          market: marketPda,
+          yesMint: yesMint,
+          noMint: noMint,
+          lpPosition: lpPda,
+          userYes: userYes,
+          userNo: userNo,
+          tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions(preIxs)
         .rpc();
@@ -57,7 +76,11 @@ export function ResidualsWidget({ market }: { market: MarketData }) {
       });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg.includes("WalletSign") || msg.includes("User rejected")) { toast.info("Transaction cancelled"); setLoading(false); return; }
+      if (msg.includes("WalletSign") || msg.includes("User rejected")) {
+        toast.info("Transaction cancelled");
+        setLoading(false);
+        return;
+      }
       if (msg.includes("NoResidualsToClaim")) {
         toast.info("No residuals to claim yet.");
       } else {
@@ -74,7 +97,12 @@ export function ResidualsWidget({ market }: { market: MarketData }) {
       <p className="text-[12px] text-text-dim leading-[1.5]">
         As the market approaches expiry, YES+NO tokens are released to LPs.
       </p>
-      <Button variant="secondary" className="w-full" onClick={handleClaim} disabled={loading || !publicKey}>
+      <Button
+        variant="secondary"
+        className="w-full"
+        onClick={handleClaim}
+        disabled={loading || !publicKey}
+      >
         {loading ? "Claiming..." : "Claim Residuals"}
       </Button>
     </div>

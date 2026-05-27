@@ -1,27 +1,37 @@
 "use client";
 
+/* eslint-disable @typescript-eslint/no-explicit-any --
+ * Write-path Anchor CPI builder for simulating swaps. Uses
+ * `(program.methods as any)` because the generated IDL TS types lag the
+ * on-chain struct between `anchor build` runs. Read-only fetchers use the
+ * typed namespace from `@/lib/program`.
+ */
+
 import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, ComputeBudgetProgram, Transaction, type TransactionInstruction, type Connection } from "@solana/web3.js";
+import {
+  PublicKey,
+  ComputeBudgetProgram,
+  Transaction,
+  type TransactionInstruction,
+  type Connection,
+} from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import { Program, BN } from "@anchor-lang/core";
-import idl from "@/lib/pm_amm_idl.json";
+import { BN } from "@anchor-lang/core";
 import { USDC_MINT } from "@/lib/constants";
 import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
+import { getReadOnlyProgram } from "@/lib/program";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 
 export interface PositionValue {
   yesValueUsdc: number; // lamports of USDC you'd get selling all YES
-  noValueUsdc: number;  // lamports of USDC you'd get selling all NO
-  totalUsdc: number;    // total position value in USDC lamports
+  noValueUsdc: number; // lamports of USDC you'd get selling all NO
+  totalUsdc: number; // total position value in USDC lamports
   error: string | null;
 }
 
 /** Simulate selling all YES and NO tokens to get exact USDC value from the program. */
-export function usePositionValue(
-  marketPda: string | undefined,
-  tokens: UserTokens | null
-) {
+export function usePositionValue(marketPda: string | undefined, tokens: UserTokens | null) {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
 
@@ -36,7 +46,10 @@ export function usePositionValue(
 
       try {
         const market = new PublicKey(marketPda);
-        const program = new Program(idl as any, { connection } as any);
+        // Use the helper so the IDL address matches the env-driven PROGRAM_ID
+        // (the JSON ships with localnet; without the helper override the
+        // simulated tx targets the wrong program on devnet).
+        const { program } = getReadOnlyProgram(connection);
 
         const yesMint = deriveYesMint(market);
         const noMint = deriveNoMint(market);
@@ -67,22 +80,40 @@ export function usePositionValue(
         // Simulate selling YES tokens
         if (yesAmount > 0) {
           yesValueUsdc = await simulateSell(
-            program, connection, publicKey,
-            { yesToUsdc: {} }, yesAmount,
-            market, yesMint, noMint, vault,
-            userUsdc, userYes, userNo,
-            ataIxs, userUsdc
+            program,
+            connection,
+            publicKey,
+            { yesToUsdc: {} },
+            yesAmount,
+            market,
+            yesMint,
+            noMint,
+            vault,
+            userUsdc,
+            userYes,
+            userNo,
+            ataIxs,
+            userUsdc,
           );
         }
 
         // Simulate selling NO tokens
         if (noAmount > 0) {
           noValueUsdc = await simulateSell(
-            program, connection, publicKey,
-            { noToUsdc: {} }, noAmount,
-            market, yesMint, noMint, vault,
-            userUsdc, userYes, userNo,
-            ataIxs, userUsdc
+            program,
+            connection,
+            publicKey,
+            { noToUsdc: {} },
+            noAmount,
+            market,
+            yesMint,
+            noMint,
+            vault,
+            userUsdc,
+            userYes,
+            userNo,
+            ataIxs,
+            userUsdc,
           );
         }
 
@@ -95,7 +126,9 @@ export function usePositionValue(
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         return {
-          yesValueUsdc: 0, noValueUsdc: 0, totalUsdc: 0,
+          yesValueUsdc: 0,
+          noValueUsdc: 0,
+          totalUsdc: 0,
           error: msg.slice(0, 80) || "Unknown error",
         };
       }
@@ -106,7 +139,6 @@ export function usePositionValue(
   });
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any -- Anchor Program type requires IDL generics
 async function simulateSell(
   program: any,
   connection: Connection,
@@ -121,7 +153,7 @@ async function simulateSell(
   userYes: PublicKey,
   userNo: PublicKey,
   ataIxs: TransactionInstruction[],
-  outputAta: PublicKey
+  outputAta: PublicKey,
 ): Promise<number> {
   // Get pre-balance of USDC ATA
   let preBal = 0;
@@ -131,14 +163,22 @@ async function simulateSell(
       const view = new DataView(info.data.buffer, info.data.byteOffset);
       preBal = Number(view.getBigUint64(64, true));
     }
-  } catch { /* ATA doesn't exist */ }
+  } catch {
+    /* ATA doesn't exist */
+  }
 
   const ix = await (program.methods as any)
     .swap(direction, new BN(amount), new BN(0))
     .accounts({
-      signer: publicKey, market, collateralMint: USDC_MINT,
-      yesMint: yesMint, noMint: noMint, vault,
-      userCollateral: userUsdc, userYes: userYes, userNo: userNo,
+      signer: publicKey,
+      market,
+      collateralMint: USDC_MINT,
+      yesMint: yesMint,
+      noMint: noMint,
+      vault,
+      userCollateral: userUsdc,
+      userYes: userYes,
+      userNo: userNo,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .instruction();
@@ -146,7 +186,7 @@ async function simulateSell(
   const tx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
     ...ataIxs,
-    ix
+    ix,
   );
   tx.feePayer = publicKey;
   tx.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
@@ -158,7 +198,7 @@ async function simulateSell(
   // Read post-balance from simulated accounts
   const postAccounts = (sim.value as any).accounts;
   if (postAccounts?.[0]?.data) {
-    const buf = Uint8Array.from(atob(postAccounts[0].data[0]), c => c.charCodeAt(0));
+    const buf = Uint8Array.from(atob(postAccounts[0].data[0]), (c) => c.charCodeAt(0));
     const view = new DataView(buf.buffer);
     const postBal = Number(view.getBigUint64(64, true));
     return Math.max(postBal - preBal, 0);

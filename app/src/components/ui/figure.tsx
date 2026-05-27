@@ -37,11 +37,7 @@ export function Figure({
         </div>
       )}
       <div
-        className={[
-          "font-mono tnum leading-none",
-          sizeStyles[size],
-          colorStyles[color],
-        ].join(" ")}
+        className={["font-mono tnum leading-none", sizeStyles[size], colorStyles[color]].join(" ")}
       >
         {value}
       </div>

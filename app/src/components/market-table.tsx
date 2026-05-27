@@ -69,9 +69,7 @@ export function MarketTable({ markets, selectedId, onSelect, priceHistories }: M
               "grid-cols-[1fr_60px_160px_80px_72px_60px]",
             ].join(" ")}
           >
-            {isSelected && (
-              <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent" />
-            )}
+            {isSelected && <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-accent" />}
 
             {/* Market name */}
             <div className="min-w-0 font-sans text-[13px] text-text-hi tracking-[-0.005em] truncate">

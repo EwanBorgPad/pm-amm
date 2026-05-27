@@ -14,7 +14,7 @@ interface PricePoint {
  * Falls back gracefully if Redis is not configured (empty map).
  */
 export function usePriceHistories(
-  markets: MarketData[] | undefined
+  markets: MarketData[] | undefined,
 ): Map<string, number[]> | undefined {
   const ids = markets?.filter((m) => !m.resolved).map((m) => m.publicKey) ?? [];
 
@@ -29,7 +29,10 @@ export function usePriceHistories(
           const json = await res.json();
           const points: PricePoint[] = json.points ?? [];
           if (points.length >= 3) {
-            results.set(id, points.map((p) => p.p));
+            results.set(
+              id,
+              points.map((p) => p.p),
+            );
           }
         } catch {
           // Silently skip — fallback to seed sparkline

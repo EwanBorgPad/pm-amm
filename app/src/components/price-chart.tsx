@@ -11,9 +11,7 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
   const { data: points } = usePriceHistory(marketId);
 
   // Use Redis data + append current live price as last point
-  const history = points && points.length >= 2
-    ? points.map((p) => p.p)
-    : [0.5];
+  const history = points && points.length >= 2 ? points.map((p) => p.p) : [0.5];
   const prices = [...history, currentPrice];
 
   const W = 600;
@@ -51,7 +49,7 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
 
   // Y-axis ticks
   const ticks = [0.25, 0.5, 0.75].filter(
-    (t) => t > padded_min + padded_range * 0.08 && t < padded_max - padded_range * 0.08
+    (t) => t > padded_min + padded_range * 0.08 && t < padded_max - padded_range * 0.08,
   );
 
   return (
@@ -64,11 +62,7 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
         </div>
       </div>
 
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ height: "auto", maxHeight: 200 }}
-      >
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: "auto", maxHeight: 200 }}>
         <defs>
           <linearGradient id="yesGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor="var(--yes)" stopOpacity="0.15" />
@@ -84,12 +78,20 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
         {ticks.map((t) => (
           <g key={t}>
             <line
-              x1={PAD_L} y1={toY(t)} x2={W - PAD_R} y2={toY(t)}
-              stroke="var(--line)" strokeWidth="0.5" strokeDasharray="2 3"
+              x1={PAD_L}
+              y1={toY(t)}
+              x2={W - PAD_R}
+              y2={toY(t)}
+              stroke="var(--line)"
+              strokeWidth="0.5"
+              strokeDasharray="2 3"
             />
             <text
-              x={PAD_L - 6} y={toY(t) + 3}
-              fill="var(--muted)" fontSize="9" fontFamily="var(--font-mono)"
+              x={PAD_L - 6}
+              y={toY(t) + 3}
+              fill="var(--muted)"
+              fontSize="9"
+              fontFamily="var(--font-mono)"
               textAnchor="end"
             >
               {(t * 100).toFixed(0)}%
@@ -100,8 +102,12 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
         {/* 50% midline */}
         {padded_min < 0.5 && padded_max > 0.5 && (
           <line
-            x1={PAD_L} y1={toY(0.5)} x2={W - PAD_R} y2={toY(0.5)}
-            stroke="var(--line-2)" strokeWidth="0.5"
+            x1={PAD_L}
+            y1={toY(0.5)}
+            x2={W - PAD_R}
+            y2={toY(0.5)}
+            stroke="var(--line-2)"
+            strokeWidth="0.5"
           />
         )}
 
@@ -120,15 +126,21 @@ export function PriceChart({ marketId, currentPrice }: PriceChartProps) {
 
         {/* YES / NO labels */}
         <text
-          x={PAD_L + 4} y={PAD_T + chartH - 4}
-          fill="var(--yes)" fontSize="10" fontFamily="var(--font-mono)"
+          x={PAD_L + 4}
+          y={PAD_T + chartH - 4}
+          fill="var(--yes)"
+          fontSize="10"
+          fontFamily="var(--font-mono)"
           opacity="0.6"
         >
           YES
         </text>
         <text
-          x={PAD_L + 4} y={PAD_T + 12}
-          fill="var(--no)" fontSize="10" fontFamily="var(--font-mono)"
+          x={PAD_L + 4}
+          y={PAD_T + 12}
+          fill="var(--no)"
+          fontSize="10"
+          fontFamily="var(--font-mono)"
           opacity="0.6"
         >
           NO

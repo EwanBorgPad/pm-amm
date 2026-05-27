@@ -5,17 +5,10 @@ interface AmountInputProps extends InputHTMLAttributes<HTMLInputElement> {
   unit?: string;
 }
 
-export function AmountInput({
-  label,
-  unit = "USDC",
-  className = "",
-  ...props
-}: AmountInputProps) {
+export function AmountInput({ label, unit = "USDC", className = "", ...props }: AmountInputProps) {
   return (
     <div className={className}>
-      {label && (
-        <div className="text-caption mb-[8px]">{label}</div>
-      )}
+      {label && <div className="text-caption mb-[8px]">{label}</div>}
       <div
         className={[
           "flex items-center",
@@ -33,9 +26,7 @@ export function AmountInput({
           ].join(" ")}
           {...props}
         />
-        <span className="font-mono text-[12px] text-muted shrink-0">
-          {unit}
-        </span>
+        <span className="font-mono text-[12px] text-muted shrink-0">{unit}</span>
       </div>
     </div>
   );

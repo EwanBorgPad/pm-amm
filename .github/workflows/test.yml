@@ -91,3 +91,21 @@ jobs:
       - name: Run oracle tests
         working-directory: oracle
         run: python -m pytest test_oracle.py test_properties.py -v
+
+  idl-coherence:
+    # Guards against IDL drift: the bundled JSONs (idl/pm_amm.json and
+    # app/src/lib/pm_amm_idl.json) must stay in sync with the Rust struct
+    # definitions in anchor/programs/pm_amm/src/state.rs. Pure stdlib check,
+    # ~5s on a cold runner.
+    name: IDL ↔ struct coherence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check IDL coherence
+        run: python3 scripts/check_idl_coherence.py

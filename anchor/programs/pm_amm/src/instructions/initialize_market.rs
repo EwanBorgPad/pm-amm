@@ -84,25 +84,51 @@ pub struct InitializeMarket<'info> {
 }
 
 /// Create a new prediction market with YES/NO mints and USDC vault.
+///
+/// `initial_price_bps`: YES price at first deposit, in basis points.
+///   0       = legacy default (50/50)
+///   100..=9900 = explicit seed price (1% .. 99%)
+///   any other value is rejected.
+///
+/// EXTENSION over the Paradigm pm-AMM paper: the paper calibrates the AMM at
+/// P = 0.5 (binary case). Allowing an arbitrary seed price is needed so a
+/// `GroupMarket` of N legs can boot each leg at 10_000 / N bps and satisfy
+/// Σ p_i = 1 from the first block. Per-leg math is unchanged.
 pub fn handler(
     ctx: Context<InitializeMarket>,
     market_id: u64,
     end_ts: i64,
     name: String,
+    initial_price_bps: u16,
 ) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
     /// Minimum market duration in seconds (5 minutes).
     const MIN_DURATION_SECS: i64 = 300;
+    /// Maximum market duration in seconds (~50 years). Bounded to prevent
+    /// indefinite fund lockup if the authority disappears before resolving.
+    const MAX_DURATION_SECS: i64 = 50 * 365 * 24 * 60 * 60;
+    /// Permitted explicit initial price range (1% to 99% in basis points).
+    const MIN_INIT_PRICE_BPS: u16 = 100;
+    const MAX_INIT_PRICE_BPS: u16 = 9900;
 
     require!(
         end_ts > now + MIN_DURATION_SECS,
         PmAmmError::InvalidDuration
     );
     require!(
+        end_ts <= now.saturating_add(MAX_DURATION_SECS),
+        PmAmmError::InvalidDuration
+    );
+    require!(
         !name.is_empty() && name.len() <= 64,
         PmAmmError::InvalidName
+    );
+    require!(
+        initial_price_bps == 0
+            || (MIN_INIT_PRICE_BPS..=MAX_INIT_PRICE_BPS).contains(&initial_price_bps),
+        PmAmmError::InvalidPrice
     );
 
     let market = &mut ctx.accounts.market;
@@ -144,6 +170,12 @@ pub fn handler(
     market.winning_side = 0;
 
     market.bump = ctx.bumps.market;
+
+    // EXTENSION fields. `group` defaults to Pubkey::default() (standalone)
+    // and is set later by `attach_leg_to_group` if this market becomes a
+    // leg of a multi-outcome group.
+    market.initial_price_bps = initial_price_bps;
+    market.group = Pubkey::default();
 
     // Signer seeds for Market PDA (mint authority)
     let id_bytes = market_id.to_le_bytes();

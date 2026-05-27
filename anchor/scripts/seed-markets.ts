@@ -8,16 +8,10 @@
 
 import * as anchor from "@anchor-lang/core";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import {
-  ComputeBudgetProgram,
-  PublicKey,
-  SystemProgram,
-} from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, SystemProgram } from "@solana/web3.js";
 
 const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
-const TOKEN_METADATA_PROGRAM = new PublicKey(
-  "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
-);
+const TOKEN_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 const MARKETS = [
   { name: "Will BTC hit $200k by Dec 2026?", durationDays: 30, liquidity: 100 },
@@ -45,39 +39,28 @@ async function main() {
     const endTs = now + m.durationDays * 86400;
 
     const [marketPda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("market"),
-        new anchor.BN(marketId).toArrayLike(Buffer, "le", 8),
-      ],
-      program.programId
+      [Buffer.from("market"), new anchor.BN(marketId).toArrayLike(Buffer, "le", 8)],
+      program.programId,
     );
     const [yesMint] = PublicKey.findProgramAddressSync(
       [Buffer.from("yes_mint"), marketPda.toBuffer()],
-      program.programId
+      program.programId,
     );
     const [noMint] = PublicKey.findProgramAddressSync(
       [Buffer.from("no_mint"), marketPda.toBuffer()],
-      program.programId
+      program.programId,
     );
     const [vault] = PublicKey.findProgramAddressSync(
       [Buffer.from("vault"), marketPda.toBuffer()],
-      program.programId
+      program.programId,
     );
     const [yesMetadata] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("metadata"),
-        TOKEN_METADATA_PROGRAM.toBuffer(),
-        yesMint.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM
+      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), yesMint.toBuffer()],
+      TOKEN_METADATA_PROGRAM,
     );
     const [noMetadata] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("metadata"),
-        TOKEN_METADATA_PROGRAM.toBuffer(),
-        noMint.toBuffer(),
-      ],
-      TOKEN_METADATA_PROGRAM
+      [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), noMint.toBuffer()],
+      TOKEN_METADATA_PROGRAM,
     );
 
     console.log(`--- ${m.name} (${m.durationDays}d, ${m.liquidity} USDC) ---`);
@@ -99,9 +82,7 @@ async function main() {
         tokenProgram: TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
       })
-      .preInstructions([
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-      ])
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
       .rpc();
     console.log(`  Created: ${marketPda.toBase58()} (ID: ${marketId})`);
 
@@ -111,7 +92,7 @@ async function main() {
       const userUsdc = await getAssociatedTokenAddress(USDC_MINT, wallet);
       const [lpPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("lp"), marketPda.toBuffer(), wallet.toBuffer()],
-        program.programId
+        program.programId,
       );
 
       await (program.methods as any)
@@ -126,9 +107,7 @@ async function main() {
           systemProgram: SystemProgram.programId,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .preInstructions([
-          ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-        ])
+        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
         .rpc();
       console.log(`  LP: ${m.liquidity} USDC deposited`);
     }

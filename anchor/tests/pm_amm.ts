@@ -2,13 +2,7 @@ import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PmAmm } from "../target/types/pm_amm";
 import { PublicKey, SystemProgram, ComputeBudgetProgram } from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  createMint,
-  createAccount,
-  mintTo,
-  getAccount,
-} from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
 import { assert } from "chai";
 
 const YES_MINT_SEED = Buffer.from("yes_mint");
@@ -16,26 +10,41 @@ const NO_MINT_SEED = Buffer.from("no_mint");
 const VAULT_SEED = Buffer.from("vault");
 const LP_SEED = Buffer.from("lp");
 
+/** Metaplex Token Metadata Program — required by initialize_market for the
+ *  YES/NO mint metadata CPI. */
+const METAPLEX_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+
+/** Metaplex metadata PDA: [b"metadata", program, mint]. */
+function deriveMetadataPda(mint: PublicKey): PublicKey {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("metadata"), METAPLEX_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+    METAPLEX_PROGRAM_ID,
+  )[0];
+}
+
 function deriveMarketPdas(marketId: anchor.BN, programId: PublicKey) {
   const [marketPda, marketBump] = PublicKey.findProgramAddressSync(
     [Buffer.from("market"), marketId.toArrayLike(Buffer, "le", 8)],
-    programId
+    programId,
   );
   const [yesMint] = PublicKey.findProgramAddressSync(
-    [YES_MINT_SEED, marketPda.toBuffer()], programId
+    [YES_MINT_SEED, marketPda.toBuffer()],
+    programId,
   );
   const [noMint] = PublicKey.findProgramAddressSync(
-    [NO_MINT_SEED, marketPda.toBuffer()], programId
+    [NO_MINT_SEED, marketPda.toBuffer()],
+    programId,
   );
-  const [vault] = PublicKey.findProgramAddressSync(
-    [VAULT_SEED, marketPda.toBuffer()], programId
-  );
-  return { marketPda, marketBump, yesMint, noMint, vault };
+  const [vault] = PublicKey.findProgramAddressSync([VAULT_SEED, marketPda.toBuffer()], programId);
+  const yesMetadata = deriveMetadataPda(yesMint);
+  const noMetadata = deriveMetadataPda(noMint);
+  return { marketPda, marketBump, yesMint, noMint, vault, yesMetadata, noMetadata };
 }
 
 function deriveLpPda(marketPda: PublicKey, owner: PublicKey, programId: PublicKey) {
   const [lpPda] = PublicKey.findProgramAddressSync(
-    [LP_SEED, marketPda.toBuffer(), owner.toBuffer()], programId
+    [LP_SEED, marketPda.toBuffer(), owner.toBuffer()],
+    programId,
   );
   return lpPda;
 }
@@ -65,21 +74,25 @@ describe("pm_amm", () => {
   // Step 1: Initialize market (7 days)
   // ================================================================
   it("1. initialize_market", async () => {
-    marketId = new anchor.BN(42);
+    // Random id to avoid collisions with PDAs from an earlier non-reset run.
+    marketId = new anchor.BN(Math.floor(Math.random() * 1_000_000_000) + 3_000_000_000);
     pdas = deriveMarketPdas(marketId, program.programId);
 
     const now = Math.floor(Date.now() / 1000);
     const endTs = new anchor.BN(now + 86400 * 7);
 
     await program.methods
-      .initializeMarket(marketId, endTs)
-      .accounts({
+      .initializeMarket(marketId, endTs, "Integration test market", 0)
+      .accountsPartial({
         authority,
         market: pdas.marketPda,
         collateralMint,
         yesMint: pdas.yesMint,
         noMint: pdas.noMint,
         vault: pdas.vault,
+        yesMetadata: pdas.yesMetadata,
+        noMetadata: pdas.noMetadata,
+        tokenMetadataProgram: METAPLEX_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
@@ -113,7 +126,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .suggestLZero(new anchor.BN(1_000_000_000), new anchor.BN(5000)) // 1000 USDC, 50% sigma
-      .accounts({ market: pdas.marketPda })
+      .accountsPartial({ market: pdas.marketPda })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
       .rpc();
 
@@ -128,7 +141,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .suggestLZero(new anchor.BN(1_000_000_000), new anchor.BN(30000)) // 300% sigma
-      .accounts({ market: pdas.marketPda })
+      .accountsPartial({ market: pdas.marketPda })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
       .rpc();
 
@@ -143,7 +156,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .depositLiquidity(new anchor.BN(1_000_000_000)) // 1000 USDC
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -181,7 +194,7 @@ describe("pm_amm", () => {
   it("3. swap 100 USDC → YES", async () => {
     await program.methods
       .swap({ usdcToYes: {} } as any, new anchor.BN(100_000_000), new anchor.BN(0))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -216,7 +229,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .swap({ usdcToNo: {} } as any, new anchor.BN(50_000_000), new anchor.BN(0))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -241,7 +254,7 @@ describe("pm_amm", () => {
   it("accrue (permissionless)", async () => {
     await program.methods
       .accrue()
-      .accounts({ market: pdas.marketPda })
+      .accountsPartial({ market: pdas.marketPda })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
       .rpc();
 
@@ -258,7 +271,7 @@ describe("pm_amm", () => {
     // Do a swap first to move reserves and trigger accrual with time passage
     await program.methods
       .swap({ usdcToYes: {} } as any, new anchor.BN(10_000_000), new anchor.BN(0))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -277,7 +290,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .claimLpResiduals()
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           yesMint: pdas.yesMint,
@@ -296,7 +309,7 @@ describe("pm_amm", () => {
       assert.equal(
         lp.yesPerShareCheckpoint.toString(),
         market.cumYesPerShare.toString(),
-        "checkpoint synced"
+        "checkpoint synced",
       );
     } catch (err) {
       // On localnet without time warp, accrual may produce 0 residuals
@@ -317,7 +330,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .withdrawLiquidity(sharesToBurn)
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -352,7 +365,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .claimLpResiduals()
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           yesMint: pdas.yesMint,
@@ -384,7 +397,7 @@ describe("pm_amm", () => {
 
     await program.methods
       .redeemPair(new anchor.BN(redeemAmount))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: pdas.marketPda,
         collateralMint,
@@ -415,7 +428,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .redeemPair(new anchor.BN(0))
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           collateralMint,
@@ -441,7 +454,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .redeemPair(new anchor.BN(999_999_999_999))
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           collateralMint,
@@ -456,7 +469,7 @@ describe("pm_amm", () => {
         .rpc();
       assert.fail("Should have thrown");
     } catch (err) {
-      assert.include(err.toString(), "InsufficientLiquidity");
+      assert.include(err.toString(), "InsufficientBalance");
     }
   });
 
@@ -469,9 +482,9 @@ describe("pm_amm", () => {
         .swap(
           { usdcToYes: {} } as any,
           new anchor.BN(10_000_000), // 10 USDC
-          new anchor.BN(999_999_999) // impossible min_output
+          new anchor.BN(999_999_999), // impossible min_output
         )
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           collateralMint,
@@ -498,7 +511,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .resolveMarket({ yes: {} } as any)
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
         })
@@ -516,13 +529,15 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .claimWinnings(new anchor.BN(1))
-        .accounts({
+        .accountsPartial({
           signer: authority,
           market: pdas.marketPda,
           collateralMint,
-          winningMint: pdas.yesMint,
+          yesMint: pdas.yesMint,
+          noMint: pdas.noMint,
           vault: pdas.vault,
-          userWinning: userYes,
+          userYes,
+          userNo,
           userCollateral: userUsdc,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
@@ -538,20 +553,23 @@ describe("pm_amm", () => {
   // ================================================================
   it("full lifecycle: init → deposit → resolve → claim_winnings", async () => {
     // Create a new market that expires in 1h01m (just over minimum)
-    const shortId = new anchor.BN(777);
+    const shortId = new anchor.BN(Math.floor(Math.random() * 1_000_000_000) + 4_000_000_000);
     const shortPdas = deriveMarketPdas(shortId, program.programId);
     const now = Math.floor(Date.now() / 1000);
     const shortEnd = new anchor.BN(now + 3601); // 1h01m
 
     await program.methods
-      .initializeMarket(shortId, shortEnd)
-      .accounts({
+      .initializeMarket(shortId, shortEnd, "Short integration market", 0)
+      .accountsPartial({
         authority,
         market: shortPdas.marketPda,
         collateralMint,
         yesMint: shortPdas.yesMint,
         noMint: shortPdas.noMint,
         vault: shortPdas.vault,
+        yesMetadata: shortPdas.yesMetadata,
+        noMetadata: shortPdas.noMetadata,
+        tokenMetadataProgram: METAPLEX_PROGRAM_ID,
         systemProgram: SystemProgram.programId,
         tokenProgram: TOKEN_PROGRAM_ID,
         rent: anchor.web3.SYSVAR_RENT_PUBKEY,
@@ -559,14 +577,24 @@ describe("pm_amm", () => {
       .rpc();
 
     // Create YES/NO token accounts for this market
-    const shortUserYes = await createAccount(provider.connection, payer, shortPdas.yesMint, authority);
-    const shortUserNo = await createAccount(provider.connection, payer, shortPdas.noMint, authority);
+    const shortUserYes = await createAccount(
+      provider.connection,
+      payer,
+      shortPdas.yesMint,
+      authority,
+    );
+    const shortUserNo = await createAccount(
+      provider.connection,
+      payer,
+      shortPdas.noMint,
+      authority,
+    );
     const shortLp = deriveLpPda(shortPdas.marketPda, authority, program.programId);
 
     // Deposit 100 USDC
     await program.methods
       .depositLiquidity(new anchor.BN(100_000_000))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: shortPdas.marketPda,
         collateralMint,
@@ -582,7 +610,7 @@ describe("pm_amm", () => {
     // Swap to get some YES tokens
     await program.methods
       .swap({ usdcToYes: {} } as any, new anchor.BN(10_000_000), new anchor.BN(0))
-      .accounts({
+      .accountsPartial({
         signer: authority,
         market: shortPdas.marketPda,
         collateralMint,
@@ -623,7 +651,7 @@ describe("pm_amm", () => {
     try {
       await program.methods
         .resolveMarket({ yes: {} } as any)
-        .accounts({
+        .accountsPartial({
           signer: faker.publicKey,
           market: pdas.marketPda,
         })

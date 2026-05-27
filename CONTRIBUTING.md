@@ -43,20 +43,24 @@ cp .env.example app/.env.local
 ## Running Tests
 
 ```bash
-# Rust unit tests (49 tests — math, accrual, state)
-cd anchor && cargo test --package pm_amm
+# Rust unit tests (60 tests — math, accrual, state, group invariants)
+cd anchor && cargo test --package pm_amm --lib
 
-# TypeScript integration tests (18 tests — requires local validator)
+# TypeScript integration tests (46 across pm_amm.ts + group_market.ts + access_control.ts;
+# requires Anchor + surfpool — boots automatically with Metaplex cloned from devnet)
 cd anchor && anchor test
 
-# Python oracle tests (130 tests — scipy cross-validation)
-cd oracle && python3 -m pytest test_oracle.py test_properties.py -v
+# Python oracle tests (136 — scipy cross-validation)
+cd oracle && python3 test_oracle.py && python3 test_properties.py
+
+# IDL coherence (script enforces struct ↔ JSON alignment across the 3 bundled IDLs)
+python3 scripts/check_idl_coherence.py
 
 # Frontend type-check + build
 cd app && pnpm tsc --noEmit && pnpm build
 
-# Lint
-cd app && pnpm lint
+# Lint (Prettier + ESLint)
+pnpm lint
 ```
 
 ## Code Standards
