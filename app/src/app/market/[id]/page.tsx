@@ -12,6 +12,7 @@ import { ProbabilityBar } from "@/components/ui/probability-bar";
 import { MetaRow } from "@/components/ui/meta-row";
 import { Badge } from "@/components/ui/badge";
 import { useMarkets } from "@/hooks/use-markets";
+import { usePriceRecorder } from "@/hooks/use-price-recorder";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { formatUsdc, poolValue } from "@/lib/pm-math";
 import { Countdown } from "@/components/ui/countdown";
@@ -24,6 +25,10 @@ import Link from "next/link";
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: markets, isLoading } = useMarkets();
+  // Snap prices passively from this page too. Without this, users who land
+  // here via a shared deep-link don't contribute to the Redis price history
+  // and the chart stays flat. Recorder is debounced + delta-gated internally.
+  usePriceRecorder(markets);
   const market = markets?.find((m) => m.marketId === Number(id));
 
   const marketPda = market ? new PublicKey(market.publicKey) : undefined;

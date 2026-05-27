@@ -13,6 +13,7 @@ import { MultiLineChart, seriesColor, type Series } from "@/components/multi-lin
 import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useGroup, type GroupData } from "@/hooks/use-groups";
 import { usePriceHistories } from "@/hooks/use-price-histories";
+import { usePriceRecorder } from "@/hooks/use-price-recorder";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { useProgram } from "@/hooks/use-program";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -32,6 +33,10 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const { data: markets } = useMarkets();
   const { data: group, isLoading } = useGroup(Number(id), markets);
   const priceHistories = usePriceHistories(markets);
+  // Record price snapshots passively. Without this on the group page,
+  // visitors who land here directly via a shared link don't contribute to
+  // the price history Redis store, and the multi-line chart stays flat.
+  usePriceRecorder(markets);
 
   return (
     <>
