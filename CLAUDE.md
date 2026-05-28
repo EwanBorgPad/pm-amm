@@ -36,9 +36,9 @@ pnpm run seed          # Seed devnet markets (scripts/seed-markets.ts)
 pnpm run musdc         # Mint mock USDC on devnet
 
 # Tests
-pnpm run test          # Anchor integration tests on localnet (46 TS tests across
-                       # pm_amm.ts + group_market.ts + access_control.ts)
-pnpm run test:rust     # Rust unit tests only (60 tests: pm_math, accrual, state, group)
+pnpm run test          # Anchor integration tests on localnet (64 TS tests across
+                       # pm_amm.ts + group_market.ts + access_control.ts + vault.ts + vault_group.ts)
+pnpm run test:rust     # Rust unit tests only (72 tests: pm_math, accrual, state, group, vault, vault_group)
 pnpm run test:all      # Rust + Python (pytest oracle + properties)
 
 # Quality gates
@@ -54,20 +54,22 @@ cd anchor && cargo test --package pm_amm --lib -- --nocapture  # show println!
 
 # Direct (Python oracle — no pytest dependency needed)
 cd oracle && python3 test_oracle.py        # 112 tests (scipy reference)
-cd oracle && python3 test_properties.py    # 24 tests (paper properties A-G)
+cd oracle && python3 test_properties.py    # 18 tests (paper properties A-G)
 ```
 
 ### Test count (must stay green)
 
 | Suite | Count | Run with |
 |---|---|---|
-| Rust unit | **60** | `pnpm run test:rust` |
+| Rust unit | **72** | `pnpm run test:rust` |
 | TS integration — `pm_amm.ts` (binary lifecycle) | **18** | `pnpm run test` (localnet) |
 | TS integration — `group_market.ts` (5 group ix) | **22** | (same) |
 | TS integration — `access_control.ts` | **6** | (same) |
+| TS integration — `vault.ts` (Sprint 22 commit vault) | **9** | (same) |
+| TS integration — `vault_group.ts` (Sprint 23 multi-outcome vault) | **9** | (same) |
 | Python oracle | **112** | `python3 oracle/test_oracle.py` |
-| Python properties | **24** | `python3 oracle/test_properties.py` |
-| **Total (Rust + TS + Python)** | **242** | (collected manually) |
+| Python properties | **18** | `python3 oracle/test_properties.py` |
+| **Total (Rust + TS + Python)** | **266** | (collected manually) |
 
 ## Architecture
 
@@ -129,9 +131,11 @@ when it is, a follow-up sprint can adapt leg seeding to use `mint_pair` instead 
 
 ## Current Sprint
 
-Sprint 21 — Multi-outcome group markets + custom seed price (`doc/sprints/sprint-21-multi-outcome.md`)
-ported onto upstream/main. Smoke-tested end-to-end on devnet program `Dxf1…` (binary market with
-custom seed, 4-leg group, swap, expire, resolve, cascade, claim — all green).
+Sprint 23 — Multi-outcome Commitment Vault. Permissionless crowd-bootstrapped categorical markets
+(2..=8 legs). Authority sets leg names; crowd commits USDC per-leg; launch creates the GroupMarket
++ N leg markets each calibrated at `leg_total/total` bps. Refund opens if any leg < 1% share or
+total < min_total. Live on devnet program `Dxf1…`. Prior sprints (21 multi-outcome + 22 binary
+vault) remain on the same program.
 
 ## Rules
 

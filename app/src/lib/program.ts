@@ -83,6 +83,34 @@ export interface LpPositionAccount {
   bump: number;
 }
 
+export interface CommitmentVaultGroupAccount {
+  authority: Pk;
+  vaultId: Bn;
+  collateralMint: Pk;
+  name: number[];
+  legCount: number;
+  /** Per-leg label, [u8; 32] zero-padded. */
+  legNames: number[][];
+  /** Per-leg committed USDC totals (raw u64, 6 decimals). */
+  legTotals: Bn[];
+  commitEndTs: Bn;
+  marketEndTs: Bn;
+  commitCount: number;
+  minTotal: Bn;
+  groupMarketInitialized: boolean;
+  legsLaunched: number;
+  groupMarket: Pk;
+  bump: number;
+}
+
+export interface CommitPositionGroupAccount {
+  vault: Pk;
+  owner: Pk;
+  legAmounts: Bn[];
+  claimed: boolean;
+  bump: number;
+}
+
 // ----------------------------------------------------------------------------
 // Account namespace shapes — Anchor's typed surface for `program.account.<x>`
 // ----------------------------------------------------------------------------
@@ -96,6 +124,8 @@ export interface ProgramAccountNamespace {
   market: AccountFetcher<MarketAccount>;
   groupMarket: AccountFetcher<GroupMarketAccount>;
   lpPosition: AccountFetcher<LpPositionAccount>;
+  commitmentVaultGroup: AccountFetcher<CommitmentVaultGroupAccount>;
+  commitPositionGroup: AccountFetcher<CommitPositionGroupAccount>;
 }
 
 // ----------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { StatusBar } from "@/components/layout/status-bar";
@@ -8,27 +8,43 @@ import { Button } from "@/components/ui/button";
 import { MetaRow } from "@/components/ui/meta-row";
 import { Countdown } from "@/components/ui/countdown";
 import { useProgram } from "@/hooks/use-program";
-import { useVault } from "@/hooks/use-vaults";
+import { useMarkets } from "@/hooks/use-markets";
+import { useGroups } from "@/hooks/use-groups";
+import { useVaultGroup } from "@/hooks/use-vault-groups";
 import {
-  runVaultCommit,
-  runLaunchVaultMarket,
-  runClaimCommitter,
-  runRefundCommit,
-} from "@/lib/vault";
+  runVaultCommitGroup,
+  runLaunchVaultGroupMarket,
+  runLaunchVaultGroupLeg,
+  runClaimCommitterGroup,
+  runRefundCommitGroup,
+} from "@/lib/vault_group";
 import { solscanAccountUrl } from "@/lib/constants";
 import { formatUsdc } from "@/lib/pm-math";
 import { toast } from "sonner";
 import Link from "next/link";
 
-export default function VaultPage({ params }: { params: Promise<{ id: string }> }) {
+export default function VaultGroupPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data: vault, isLoading } = useVault(Number(id));
+  const { data: vault, isLoading, refetch } = useVaultGroup(Number(id));
+  const { data: markets } = useMarkets();
+  const { data: groups = [] } = useGroups(markets);
   const program = useProgram();
   const { publicKey } = useWallet();
 
+  /** Find the GroupMarket linked to this vault — needed to compute the
+   *  groupId for the "View / trade markets" link (page route uses the
+   *  numeric groupId, not the pubkey). */
+  const linkedGroup = useMemo(() => {
+    if (!vault?.groupMarket) return undefined;
+    return groups.find((g) => g.publicKey === vault.groupMarket);
+  }, [groups, vault?.groupMarket]);
+
   const [amount, setAmount] = useState("5");
-  const [side, setSide] = useState<"yes" | "no">("yes");
+  const [selectedLeg, setSelectedLeg] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [launchProgress, setLaunchProgress] = useState<{ done: number; total: number } | null>(
+    null,
+  );
 
   const handleCommit = async () => {
     if (!program || !publicKey || !vault) return;
@@ -39,8 +55,14 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     }
     setBusy(true);
     try {
-      await runVaultCommit(program, publicKey, new PublicKey(vault.publicKey), side, num);
-      toast.success(`Committed ${num} USDC on ${side.toUpperCase()}`);
+      await runVaultCommitGroup(
+        program,
+        publicKey,
+        new PublicKey(vault.publicKey),
+        selectedLeg,
+        num,
+      );
+      toast.success(`Committed ${num} USDC on ${vault.legs[selectedLeg].name}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg.slice(0, 200));
@@ -49,17 +71,61 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     }
   };
 
-  const handleLaunch = async () => {
+  /** Single-button orchestration: 1 tx for GroupMarket + N tx for legs.
+   *  Skips steps already completed (idempotent — safe to retry). */
+  const handleLaunchAll = async () => {
     if (!program || !publicKey || !vault) return;
+    const total = 1 + vault.legCount;
     setBusy(true);
+    setLaunchProgress({ done: 0, total });
     try {
-      const r = await runLaunchVaultMarket(program, publicKey, new PublicKey(vault.publicKey));
-      toast.success(`Market ${r.marketId} launched at ${(vault.impliedPrice * 100).toFixed(2)}%`);
+      // Step 1: GroupMarket (skip if already initialized)
+      let groupPubkey: PublicKey;
+      if (!vault.groupMarketInitialized) {
+        const r = await runLaunchVaultGroupMarket(
+          program,
+          publicKey,
+          new PublicKey(vault.publicKey),
+        );
+        groupPubkey = new PublicKey(r.groupPda);
+        toast.success(`GroupMarket created (${r.groupId})`);
+      } else {
+        groupPubkey = new PublicKey(vault.groupMarket);
+      }
+      setLaunchProgress({ done: 1, total });
+
+      // Step 2: each leg in sequence. On-chain idempotency
+      // (`VaultGroupLegAlreadyLaunched`) lets us safely retry — skip those.
+      let done = 1;
+      for (const leg of vault.legs) {
+        try {
+          await runLaunchVaultGroupLeg(
+            program,
+            publicKey,
+            new PublicKey(vault.publicKey),
+            groupPubkey,
+            leg.index,
+          );
+          toast.success(`Leg ${leg.name} launched`);
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg.includes("VaultGroupLegAlreadyLaunched")) {
+            // already done in a prior attempt — keep going
+          } else {
+            throw e;
+          }
+        }
+        done += 1;
+        setLaunchProgress({ done, total });
+      }
+      toast.success(`All ${vault.legCount} markets launched`);
+      await refetch();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg.slice(0, 200));
     } finally {
       setBusy(false);
+      setLaunchProgress(null);
     }
   };
 
@@ -67,7 +133,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     if (!program || !publicKey || !vault) return;
     setBusy(true);
     try {
-      await runClaimCommitter(program, publicKey, new PublicKey(vault.publicKey));
+      await runClaimCommitterGroup(program, publicKey, new PublicKey(vault.publicKey));
       toast.success("Claimed your commit back");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -81,7 +147,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     if (!program || !publicKey || !vault) return;
     setBusy(true);
     try {
-      await runRefundCommit(program, publicKey, new PublicKey(vault.publicKey));
+      await runRefundCommitGroup(program, publicKey, new PublicKey(vault.publicKey));
       toast.success("Refund successful");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -101,13 +167,16 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
 
         {isLoading && <p className="text-muted font-mono text-[12px]">Loading…</p>}
         {!isLoading && !vault && (
-          <p className="text-no font-mono text-[12px]">Vault #{id} not found.</p>
+          <p className="text-no font-mono text-[12px]">Vault group #{id} not found.</p>
         )}
 
         {vault && (
           <>
             <div className="flex items-center gap-[12px] flex-wrap mb-[8px]">
               <h2 className="text-title">{vault.name}</h2>
+              <span className="text-[10px] px-[8px] py-[2px] border border-border text-muted font-mono">
+                MULTI · {vault.legCount} LEGS
+              </span>
               {vault.isCommitOpen && (
                 <span className="text-[10px] px-[8px] py-[2px] border border-text-hi text-text-hi font-mono">
                   COMMIT OPEN
@@ -116,6 +185,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
               {vault.isLaunchReady && (
                 <span className="text-[10px] px-[8px] py-[2px] border border-yes text-yes font-mono">
                   LAUNCH READY
+                  {vault.groupMarketInitialized && ` (${vault.legsLaunched}/${vault.legCount})`}
                 </span>
               )}
               {vault.isMarketLive && (
@@ -138,14 +208,8 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-[24px] mt-[24px]">
               <div className="space-y-[8px]">
                 <p className="text-[11px] text-muted font-mono uppercase">Vault state</p>
-                <MetaRow label="YES committed" value={`${formatUsdc(vault.yesTotal)} USDC`} />
-                <MetaRow label="NO committed" value={`${formatUsdc(vault.noTotal)} USDC`} />
-                <MetaRow label="Total" value={`${formatUsdc(vault.total)} USDC`} />
+                <MetaRow label="Total committed" value={`${formatUsdc(vault.total)} USDC`} />
                 <MetaRow label="Committers" value={String(vault.commitCount)} />
-                <MetaRow
-                  label="Implied YES price"
-                  value={`${(vault.impliedPrice * 100).toFixed(2)}%`}
-                />
                 <MetaRow label="Min total" value={`${formatUsdc(vault.minTotal)} USDC`} />
                 {vault.isCommitOpen ? (
                   <MetaRow label="Commit ends" value={<Countdown endTs={vault.commitEndTs} />} />
@@ -154,18 +218,12 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                 ) : (
                   <MetaRow label="Commit ended" value="—" />
                 )}
-                {vault.launched && (
+                {vault.groupMarket && (
                   <MetaRow
-                    label="Launched at"
-                    value={`${(vault.winningPriceBps / 100).toFixed(2)}%`}
-                  />
-                )}
-                {vault.market && (
-                  <MetaRow
-                    label="Market PDA"
+                    label="GroupMarket"
                     value={
                       <a
-                        href={solscanAccountUrl(vault.market)}
+                        href={solscanAccountUrl(vault.groupMarket)}
                         target="_blank"
                         rel="noreferrer"
                         className="underline"
@@ -173,8 +231,24 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                         ↗
                       </a>
                     }
-                    last
                   />
+                )}
+
+                <p className="text-[11px] text-muted font-mono uppercase pt-[16px]">Legs</p>
+                {vault.legs.map((leg) => (
+                  <MetaRow
+                    key={leg.index}
+                    label={leg.name}
+                    value={`${formatUsdc(leg.total)} USDC · ${(leg.shareBps / 100).toFixed(2)}%`}
+                  />
+                ))}
+                {vault.fullyLaunched && linkedGroup && (
+                  <Link
+                    href={`/group/${linkedGroup.groupId}`}
+                    className="block text-center text-[11px] text-yes hover:text-text-hi font-mono uppercase tracking-[0.05em] py-[8px] mt-[8px] border border-yes/40 rounded-sm transition-colors"
+                  >
+                    ↗ View / trade markets
+                  </Link>
                 )}
               </div>
 
@@ -182,19 +256,16 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                 {vault.isCommitOpen && (
                   <>
                     <p className="text-[11px] text-muted font-mono uppercase">Commit</p>
-                    <div className="flex gap-[8px]">
-                      <Button
-                        variant={side === "yes" ? "yes" : "ghost"}
-                        onClick={() => setSide("yes")}
-                      >
-                        YES
-                      </Button>
-                      <Button
-                        variant={side === "no" ? "no" : "ghost"}
-                        onClick={() => setSide("no")}
-                      >
-                        NO
-                      </Button>
+                    <div className="flex gap-[8px] flex-wrap">
+                      {vault.legs.map((leg) => (
+                        <Button
+                          key={leg.index}
+                          variant={selectedLeg === leg.index ? "yes" : "ghost"}
+                          onClick={() => setSelectedLeg(leg.index)}
+                        >
+                          {leg.name || `Leg ${leg.index}`}
+                        </Button>
+                      ))}
                     </div>
                     <input
                       type="number"
@@ -206,7 +277,9 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                       placeholder="Amount (USDC)"
                     />
                     <Button onClick={handleCommit} disabled={busy || !publicKey} className="w-full">
-                      {busy ? "…" : `Commit ${amount} USDC on ${side.toUpperCase()}`}
+                      {busy
+                        ? "…"
+                        : `Commit ${amount} USDC on ${vault.legs[selectedLeg]?.name || "—"}`}
                     </Button>
                   </>
                 )}
@@ -217,24 +290,31 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                       Launch (permissionless)
                     </p>
                     <p className="text-[11px] text-muted">
-                      Anyone can launch — the new market starts at{" "}
-                      <strong className="text-text-hi">
-                        {(vault.impliedPrice * 100).toFixed(2)}%
-                      </strong>{" "}
-                      with {formatUsdc(vault.total)} USDC of initial liquidity.
+                      Anyone can launch — this sends{" "}
+                      <strong className="text-text-hi">{1 + vault.legCount} transactions</strong>{" "}
+                      back-to-back: 1 to create the GroupMarket, then 1 per leg. Each leg market
+                      starts at the crowd-implied price (its commit share).
                     </p>
-                    <Button onClick={handleLaunch} disabled={busy || !publicKey} className="w-full">
-                      {busy ? "…" : "Launch market"}
+                    <Button
+                      onClick={handleLaunchAll}
+                      disabled={busy || !publicKey}
+                      className="w-full"
+                    >
+                      {busy && launchProgress
+                        ? `Launching… (${launchProgress.done}/${launchProgress.total})`
+                        : busy
+                          ? "…"
+                          : `Launch ${vault.legCount} markets`}
                     </Button>
                   </>
                 )}
 
                 {vault.isMarketLive && (
                   <>
-                    <p className="text-[11px] text-muted font-mono uppercase">Market live</p>
+                    <p className="text-[11px] text-muted font-mono uppercase">Markets live</p>
                     <p className="text-[11px] text-muted">
-                      The YES/NO market is trading. Your USDC stays in the vault during the trading
-                      window. Claim opens when the market ends.
+                      All {vault.legCount} markets are trading. Your USDC stays in the vault during
+                      the trading window. Claim opens when the market ends.
                     </p>
                     <MetaRow label="Market ends" value={<Countdown endTs={vault.marketEndTs} />} />
                   </>
@@ -245,7 +325,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                     <p className="text-[11px] text-muted font-mono uppercase">Claim</p>
                     <p className="text-[11px] text-muted">
                       Market ended. Withdraw your committed USDC. (v1 returns 1:1; v2 will
-                      distribute LP shares.)
+                      distribute LP shares of each leg.)
                     </p>
                     <Button onClick={handleClaim} disabled={busy || !publicKey} className="w-full">
                       {busy ? "…" : "Claim your USDC"}
@@ -257,7 +337,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                   <>
                     <p className="text-[11px] text-muted font-mono uppercase">Refund</p>
                     <p className="text-[11px] text-muted">
-                      Commit ended below min total. Refunds are open 1:1.
+                      Commit ended below min total or at least one leg under 1%. Refunds open 1:1.
                     </p>
                     <Button onClick={handleRefund} disabled={busy || !publicKey} className="w-full">
                       {busy ? "…" : "Refund commit"}

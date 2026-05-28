@@ -93,6 +93,12 @@ export function StatusBar() {
           </svg>
           <span className="text-[10px] tracking-[0.05em]">Star us</span>
         </a>
+        <Link
+          href="/create-vault"
+          className="hidden sm:inline text-muted hover:text-text-hi transition-all duration-[120ms]"
+        >
+          OPEN VAULT
+        </Link>
         {publicKey && (
           <>
             <button

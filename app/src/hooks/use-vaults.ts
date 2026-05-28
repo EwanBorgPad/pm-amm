@@ -33,6 +33,10 @@ export interface VaultData {
   isLaunchReady: boolean;
   /** `true` iff `!launched && now >= commit_end_ts && total < min_total`. */
   isRefundOpen: boolean;
+  /** Market launched and still trading (`launched && now < market_end_ts`). */
+  isMarketLive: boolean;
+  /** Market ended — claim is open (`launched && now >= market_end_ts`). */
+  isClaimOpen: boolean;
   /** Implied current price from the commit ratio, in [0, 1]. */
   impliedPrice: number;
 }
@@ -96,6 +100,8 @@ function buildVaultData(acc: any, now: number): VaultData {
     isCommitOpen: !launched && now < commitEndTs,
     isLaunchReady: !launched && now >= commitEndTs && total >= minTotal,
     isRefundOpen: !launched && now >= commitEndTs && total < minTotal,
+    isMarketLive: launched && now < bnToNum(v.marketEndTs),
+    isClaimOpen: launched && now >= bnToNum(v.marketEndTs),
     impliedPrice: total > 0 ? yesTotal / total : 0.5,
   };
 }

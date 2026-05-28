@@ -43,14 +43,14 @@ cp .env.example app/.env.local
 ## Running Tests
 
 ```bash
-# Rust unit tests (60 tests — math, accrual, state, group invariants)
+# Rust unit tests (66 tests — math, accrual, state, group invariants, vault)
 cd anchor && cargo test --package pm_amm --lib
 
-# TypeScript integration tests (46 across pm_amm.ts + group_market.ts + access_control.ts;
+# TypeScript integration tests (55 across pm_amm.ts + group_market.ts + access_control.ts + vault.ts;
 # requires Anchor + surfpool — boots automatically with Metaplex cloned from devnet)
 cd anchor && anchor test
 
-# Python oracle tests (136 — scipy cross-validation)
+# Python oracle tests (130 — scipy cross-validation; 112 oracle + 18 properties)
 cd oracle && python3 test_oracle.py && python3 test_properties.py
 
 # IDL coherence (script enforces struct ↔ JSON alignment across the 3 bundled IDLs)

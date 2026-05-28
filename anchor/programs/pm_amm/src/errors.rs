@@ -83,4 +83,17 @@ pub enum PmAmmError {
     RefundNotAvailable,
     #[msg("Commit position has no funds to claim or refund")]
     NoCommitFunds,
+    // ----- Multi-outcome Commitment Vault (Sprint 23) -----
+    #[msg("Vault group leg index out of bounds (>= leg_count)")]
+    VaultGroupLegOutOfBounds,
+    #[msg("Vault group leg already launched")]
+    VaultGroupLegAlreadyLaunched,
+    #[msg("Vault group: not all legs launched yet")]
+    VaultGroupNotAllLegsLaunched,
+    #[msg("Vault group leg has insufficient share (< 100 bps after rounding)")]
+    VaultGroupInsufficientLegShare,
+    #[msg("Vault group: group market not yet created")]
+    VaultGroupNotInitialized,
+    #[msg("Invalid leg name: must be 1-32 bytes")]
+    InvalidLegName,
 }

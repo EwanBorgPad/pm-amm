@@ -31,6 +31,10 @@ export interface MarketData {
   cumNoPerShare: number;
   /** GroupMarket PDA this leg is attached to. "" if standalone. */
   group: string;
+  /** Calibrated initial YES price in bps (set by `initialize_market` or the
+   *  vault launch path). 0 = legacy 50/50. Used as the display price for
+   *  freshly-launched markets with zero reserves. */
+  initialPriceBps: number;
 }
 
 export function useMarkets() {
@@ -63,6 +67,7 @@ export function useMarkets() {
         const lastAccrualTs = bnToNum(m.lastAccrualTs);
         const lEffAtLastAccrual = lZero * Math.sqrt(Math.max(endTs - lastAccrualTs, 1));
 
+        const initialPriceBps: number = m.initialPriceBps ?? 0;
         let price: number;
         if (m.resolved) {
           price = m.winningSide === 1 ? 1 : m.winningSide === 2 ? 0 : 0.5;
@@ -73,10 +78,17 @@ export function useMarkets() {
           if (lEffAtLastAccrual > 0 && (x > 0 || y > 0)) {
             price = Math.max(0.001, Math.min(0.999, priceFromReserves(x, y, lEffAtLastAccrual)));
           } else {
-            // Reserves are 0 — use cumulative residuals ratio as proxy
+            // Reserves are 0 — try in priority order:
+            //   1. initial_price_bps (set by initialize_market / vault launch).
+            //      Reflects the calibration target until first deposit_liquidity.
+            //   2. cumulative residuals ratio (for expired markets where reserves
+            //      drained to LP residuals)
+            //   3. 0.5 fallback (legacy markets with no calibration)
             const cumYes = i80f48ToNumber(m.cumYesPerShare);
             const cumNo = i80f48ToNumber(m.cumNoPerShare);
-            if (cumYes + cumNo > 0) {
+            if (initialPriceBps > 0 && cumYes + cumNo === 0) {
+              price = initialPriceBps / 10_000;
+            } else if (cumYes + cumNo > 0) {
               // More NO released → price was high (YES), more YES released → price was low
               price = cumNo / (cumYes + cumNo);
             } else {
@@ -119,6 +131,7 @@ export function useMarkets() {
           cumYesPerShare: i80f48ToNumber(m.cumYesPerShare),
           cumNoPerShare: i80f48ToNumber(m.cumNoPerShare),
           group,
+          initialPriceBps,
         };
       });
     },

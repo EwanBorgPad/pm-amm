@@ -47,6 +47,17 @@ EXPECTED = {
     "CommitPosition": [
         "vault", "owner", "yes_amount", "no_amount", "claimed", "bump", "_reserved",
     ],
+    "CommitmentVaultGroup": [
+        "authority", "vault_id", "collateral_mint", "name",
+        "leg_count", "leg_names", "leg_totals",
+        "commit_end_ts", "market_end_ts",
+        "commit_count", "min_total",
+        "group_market_initialized", "legs_launched", "group_market",
+        "bump", "_reserved",
+    ],
+    "CommitPositionGroup": [
+        "vault", "owner", "leg_amounts", "claimed", "bump", "_reserved",
+    ],
 }
 
 IDL_PATHS = [

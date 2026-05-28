@@ -210,4 +210,71 @@ pub mod pm_amm {
     pub fn refund_commit(ctx: Context<RefundCommit>) -> Result<()> {
         instructions::vault::refund_commit::handler(ctx)
     }
+
+    // ========================================================================
+    // Multi-outcome Commitment Vault (Sprint 23)
+    // ========================================================================
+
+    /// Open a multi-outcome Commitment Vault. Authority picks the leg names
+    /// (2..=8). Crowd then commits per-leg with `vault_commit_group`.
+    pub fn initialize_vault_group(
+        ctx: Context<InitializeVaultGroup>,
+        vault_id: u64,
+        name: String,
+        leg_names: Vec<String>,
+        commit_duration_secs: i64,
+        market_duration_secs: i64,
+        min_total: u64,
+    ) -> Result<()> {
+        instructions::vault::initialize_vault_group::handler(
+            ctx,
+            vault_id,
+            name,
+            leg_names,
+            commit_duration_secs,
+            market_duration_secs,
+            min_total,
+        )
+    }
+
+    /// Commit USDC on a specific leg of a multi-outcome vault. Same rules as
+    /// `vault_commit`: anyone, any number of times, until commit_end_ts.
+    pub fn vault_commit_group(
+        ctx: Context<CommitGroup>,
+        leg_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        instructions::vault::vault_commit_group::handler(ctx, leg_index, amount)
+    }
+
+    /// Step 1 of launch: create the wrapping GroupMarket. Permissionless.
+    /// Refuses if any leg has < 100 bps share (the underlying pm-AMM floor).
+    pub fn launch_vault_group_market(
+        ctx: Context<LaunchVaultGroupMarket>,
+        group_id: u64,
+    ) -> Result<()> {
+        instructions::vault::launch_vault_group_market::handler(ctx, group_id)
+    }
+
+    /// Step 2 of launch (run once per leg): create the leg's binary Market +
+    /// mints + vault + Metaplex metadata, then attach it to the GroupMarket.
+    /// Each leg market is seeded at `leg_totals[i] / total` bps.
+    pub fn launch_vault_group_leg(
+        ctx: Context<LaunchVaultGroupLeg>,
+        leg_index: u8,
+        market_id: u64,
+    ) -> Result<()> {
+        instructions::vault::launch_vault_group_leg::handler(ctx, leg_index, market_id)
+    }
+
+    /// Committer claims back their USDC from a fully-launched multi-outcome
+    /// vault. v1: 1:1 refund.
+    pub fn claim_committer_group(ctx: Context<ClaimCommitterGroup>) -> Result<()> {
+        instructions::vault::claim_committer_group::handler(ctx)
+    }
+
+    /// Refund a committer 1:1 if the multi-outcome vault never launched.
+    pub fn refund_commit_group(ctx: Context<RefundCommitGroup>) -> Result<()> {
+        instructions::vault::refund_commit_group::handler(ctx)
+    }
 }
