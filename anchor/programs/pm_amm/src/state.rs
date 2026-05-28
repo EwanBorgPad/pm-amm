@@ -345,6 +345,140 @@ impl GroupMarket {
 }
 
 // ============================================================================
+// CommitmentVault — permissionless bootstrap for prediction markets
+// (Sprint 22). PDA seeds: [b"vault", vault_id.to_le_bytes()]
+//
+// Solves the cold-start problem: rather than expecting a designated LP to
+// front the initial liquidity at an arbitrary price, the vault aggregates
+// crowd commits in USDC on YES/NO, then computes the initial market price
+// from the commit ratio, calibrates L_0 via suggest_l_zero_at_price, and
+// finally launches a regular pm-AMM market with the crowd's USDC as
+// initial liquidity. Each committer becomes an LP pro-rata to their commit.
+// ============================================================================
+
+pub const MIN_COMMIT_USDC: u64 = 1_000_000; // 1 USDC (6 decimals)
+
+/// Min/max bounds for the vault's commit and market durations. Enforced at
+/// `initialize_vault` so misconfigured vaults can't be created.
+pub const MIN_COMMIT_DURATION_SECS: i64 = 60; // 1 minute
+pub const MAX_COMMIT_DURATION_SECS: i64 = 60 * 60 * 24 * 7; // 7 days
+pub const MIN_MARKET_DURATION_SECS: i64 = 300; // matches initialize_market::MIN_DURATION_SECS
+pub const MAX_MARKET_DURATION_SECS: i64 = 60 * 60 * 24 * 30; // 30 days
+
+#[account]
+pub struct CommitmentVault {
+    pub authority: Pubkey,
+    pub vault_id: u64,
+    pub collateral_mint: Pubkey,
+
+    /// UTF-8 zero-padded vault name (becomes the launched market's name).
+    pub name: [u8; 64],
+
+    /// When the commit phase ends. After this, no more commits, launch
+    /// becomes available, refund becomes available.
+    pub commit_end_ts: i64,
+
+    /// Duration of the launched market (added to launch time to get end_ts).
+    pub market_end_ts: i64,
+
+    pub yes_total: u64,
+    pub no_total: u64,
+    pub commit_count: u32,
+
+    /// Below this threshold, launch is refused → committers must refund.
+    pub min_total: u64,
+
+    pub launched: bool,
+    /// Set at launch to the initial_price_bps computed from the commit ratio.
+    /// Kept for transparency post-launch.
+    pub winning_price_bps: u16,
+
+    /// The launched Market PDA. `Pubkey::default()` pre-launch.
+    pub market: Pubkey,
+
+    /// The LpPosition PDA owned by the vault (seeds [b"lp", market, vault]).
+    /// Holds the LP shares minted at launch; claim_committer distributes them
+    /// pro-rata. `Pubkey::default()` pre-launch.
+    pub lp_position: Pubkey,
+
+    pub bump: u8,
+    pub _reserved: [u8; 32],
+}
+
+impl CommitmentVault {
+    pub const SEED: &'static [u8] = b"vault";
+
+    pub const LEN: usize = 8 // discriminator
+        + 32 // authority
+        + 8  // vault_id
+        + 32 // collateral_mint
+        + 64 // name
+        + 8  // commit_end_ts
+        + 8  // market_end_ts
+        + 8  // yes_total
+        + 8  // no_total
+        + 4  // commit_count
+        + 8  // min_total
+        + 1  // launched
+        + 2  // winning_price_bps
+        + 32 // market
+        + 32 // lp_position
+        + 1  // bump
+        + 32; // reserved
+
+    /// Total = yes_total + no_total. Used as the AMM bootstrap budget.
+    pub fn total(&self) -> u64 {
+        self.yes_total.saturating_add(self.no_total)
+    }
+
+    /// Compute the launch price in basis points from the commit ratio.
+    /// Clamped to [100, 9900] (the valid `initial_price_bps` range), so an
+    /// all-YES or all-NO crowd still produces a valid market.
+    pub fn compute_price_bps(&self) -> u16 {
+        let total = self.total();
+        if total == 0 {
+            return 5000; // fallback; caller should reject via min_total
+        }
+        // (yes_total * 10_000 / total) — checked, fits in u64 trivially.
+        let raw = (self.yes_total as u128)
+            .saturating_mul(10_000)
+            .checked_div(total as u128)
+            .unwrap_or(5000) as u64;
+        let clamped = raw.clamp(100, 9900);
+        clamped as u16
+    }
+
+    pub fn name_str(&self) -> &str {
+        let len = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+}
+
+#[account]
+pub struct CommitPosition {
+    pub vault: Pubkey,
+    pub owner: Pubkey,
+    pub yes_amount: u64,
+    pub no_amount: u64,
+    pub claimed: bool,
+    pub bump: u8,
+    pub _reserved: [u8; 16],
+}
+
+impl CommitPosition {
+    pub const SEED: &'static [u8] = b"commit";
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 1 + 1 + 16;
+
+    pub fn total(&self) -> u64 {
+        self.yes_amount.saturating_add(self.no_amount)
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -585,6 +719,90 @@ mod tests {
         assert_eq!(make_empty_group(14).expected_leg_initial_price_bps(), 714);
         assert_eq!(make_empty_group(3).expected_leg_initial_price_bps(), 3333);
         assert_eq!(make_empty_group(0).expected_leg_initial_price_bps(), 0);
+    }
+
+    // ========================================================================
+    // CommitmentVault tests (Sprint 22)
+    // ========================================================================
+
+    fn make_vault(yes: u64, no: u64) -> CommitmentVault {
+        CommitmentVault {
+            authority: Pubkey::default(),
+            vault_id: 0,
+            collateral_mint: Pubkey::default(),
+            name: [0u8; 64],
+            commit_end_ts: 0,
+            market_end_ts: 0,
+            yes_total: yes,
+            no_total: no,
+            commit_count: 0,
+            min_total: 0,
+            launched: false,
+            winning_price_bps: 0,
+            market: Pubkey::default(),
+            lp_position: Pubkey::default(),
+            bump: 0,
+            _reserved: [0u8; 32],
+        }
+    }
+
+    #[test]
+    fn test_vault_compute_price_bps() {
+        // Balanced: yes=no → 50%
+        assert_eq!(make_vault(50, 50).compute_price_bps(), 5000);
+        // All YES → clamped to 9900
+        assert_eq!(make_vault(100, 0).compute_price_bps(), 9900);
+        // All NO → clamped to 100
+        assert_eq!(make_vault(0, 100).compute_price_bps(), 100);
+        // 30/70
+        assert_eq!(make_vault(30, 70).compute_price_bps(), 3000);
+        // Tiny YES, large NO → near 100
+        let v = make_vault(1, 1_000_000);
+        let p = v.compute_price_bps();
+        assert_eq!(p, 100, "clamped at lower bound, got {p}");
+    }
+
+    #[test]
+    fn test_vault_compute_price_handles_total_zero() {
+        // No commits at all → fallback 5000 (caller should reject anyway via min_total)
+        assert_eq!(make_vault(0, 0).compute_price_bps(), 5000);
+    }
+
+    #[test]
+    fn test_vault_total_saturating() {
+        let v = make_vault(u64::MAX - 5, 10);
+        // Saturating add prevents overflow panic; behaviour is u64::MAX.
+        assert_eq!(v.total(), u64::MAX);
+    }
+
+    #[test]
+    fn test_vault_name_str() {
+        let mut v = make_vault(0, 0);
+        let s = "Will BTC hit $200k by EoY?";
+        let src = s.as_bytes();
+        v.name[..src.len()].copy_from_slice(src);
+        assert_eq!(v.name_str(), s);
+    }
+
+    #[test]
+    fn test_commit_position_total() {
+        let p = CommitPosition {
+            vault: Pubkey::default(),
+            owner: Pubkey::default(),
+            yes_amount: 5,
+            no_amount: 3,
+            claimed: false,
+            bump: 0,
+            _reserved: [0u8; 16],
+        };
+        assert_eq!(p.total(), 8);
+    }
+
+    #[test]
+    fn test_vault_len_under_solana_init_limit() {
+        const SOLANA_INIT_LIMIT: usize = 10_240;
+        const _: () = assert!(CommitmentVault::LEN < SOLANA_INIT_LIMIT);
+        const _: () = assert!(CommitPosition::LEN < SOLANA_INIT_LIMIT);
     }
 
     #[test]

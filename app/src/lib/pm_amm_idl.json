@@ -98,6 +98,130 @@
       "args": []
     },
     {
+      "name": "claim_committer",
+      "docs": [
+        "Committer claims back their USDC after launch. (v1: returns the commit",
+        "1:1; v2 will distribute LP shares of the launched market pro-rata.)"
+      ],
+      "discriminator": [
+        69,
+        50,
+        5,
+        130,
+        100,
+        35,
+        107,
+        68
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.vault_id",
+                "account": "CommitmentVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_collateral",
+          "docs": [
+            "PDA-owned vault collateral ATA."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "user_collateral",
+          "docs": [
+            "The committer's USDC ATA (must exist; the caller creates it client-side",
+            "if needed)."
+          ],
+          "writable": true
+        },
+        {
+          "name": "commit_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  109,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "claim_lp_residuals",
       "docs": [
         "Claim pending YES+NO residuals accrued to an LP position.",
@@ -581,6 +705,310 @@
       ]
     },
     {
+      "name": "initialize_vault",
+      "docs": [
+        "Open a new Commitment Vault. Anyone can call. Aggregates crowd commits",
+        "before the market exists; the launch price is computed from the",
+        "commit ratio."
+      ],
+      "discriminator": [
+        48,
+        191,
+        163,
+        44,
+        71,
+        129,
+        63,
+        164
+      ],
+      "accounts": [
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "vault_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_mint",
+          "docs": [
+            "USDC (or mock) mint. Must be 6 decimals."
+          ]
+        },
+        {
+          "name": "vault_collateral",
+          "docs": [
+            "PDA-owned token account that aggregates all commits."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "vault_id",
+          "type": "u64"
+        },
+        {
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "name": "commit_duration_secs",
+          "type": "i64"
+        },
+        {
+          "name": "market_duration_secs",
+          "type": "i64"
+        },
+        {
+          "name": "min_total",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "launch_vault_market",
+      "docs": [
+        "Launch the underlying pm-AMM market once commit_end_ts has passed and",
+        "total ≥ min_total. Permissionless. The caller pays the rent of the",
+        "new Market + mints + vault + Metaplex metadata accounts."
+      ],
+      "discriminator": [
+        1,
+        156,
+        237,
+        172,
+        168,
+        32,
+        92,
+        222
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Permissionless caller — pays the rent for the new Market/mints/vault."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.vault_id",
+                "account": "CommitmentVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "docs": [
+            "New Market PDA — derived from `market_id` (typically vault_id reused)."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  116
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "market_id"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "yes_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  121,
+                  101,
+                  115,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "no_mint",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  110,
+                  111,
+                  95,
+                  109,
+                  105,
+                  110,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market_vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "market"
+              }
+            ]
+          }
+        },
+        {
+          "name": "yes_metadata",
+          "writable": true
+        },
+        {
+          "name": "no_metadata",
+          "writable": true
+        },
+        {
+          "name": "token_metadata_program",
+          "address": "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "market_id",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "redeem_pair",
       "docs": [
         "Burn 1 YES + 1 NO to receive 1 USDC. Always valid, pre- or post-resolution."
@@ -654,6 +1082,123 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "refund_commit",
+      "docs": [
+        "Refund a committer 1:1 if the vault never launched."
+      ],
+      "discriminator": [
+        99,
+        40,
+        188,
+        37,
+        189,
+        16,
+        39,
+        175
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.vault_id",
+                "account": "CommitmentVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "vault_collateral",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "user_collateral",
+          "writable": true
+        },
+        {
+          "name": "commit_position",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  109,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
     },
     {
       "name": "resolve_group",
@@ -880,6 +1425,152 @@
       ]
     },
     {
+      "name": "vault_commit",
+      "docs": [
+        "Commit USDC on YES or NO. Anyone, any number of times, until",
+        "commit_end_ts. Min commit: 1 USDC."
+      ],
+      "discriminator": [
+        93,
+        97,
+        93,
+        186,
+        110,
+        145,
+        241,
+        119
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "vault",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault.vault_id",
+                "account": "CommitmentVault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "collateral_mint"
+        },
+        {
+          "name": "vault_collateral",
+          "docs": [
+            "Vault's PDA-owned collateral ATA — receives the transferred USDC."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  118,
+                  97,
+                  117,
+                  108,
+                  116,
+                  95,
+                  99,
+                  111,
+                  108,
+                  108,
+                  97,
+                  116,
+                  101,
+                  114,
+                  97,
+                  108
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_collateral",
+          "docs": [
+            "User's USDC source."
+          ],
+          "writable": true
+        },
+        {
+          "name": "commit_position",
+          "docs": [
+            "CommitPosition tracks this signer's commits on this vault.",
+            "init_if_needed: first commit creates it, subsequent commits update."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  109,
+                  109,
+                  105,
+                  116
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "vault"
+              },
+              {
+                "kind": "account",
+                "path": "signer"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "side",
+          "type": {
+            "defined": {
+              "name": "Side"
+            }
+          }
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
       "name": "withdraw_liquidity",
       "docs": [
         "Withdraw LP shares: auto-claims pending residuals, then mints",
@@ -970,6 +1661,32 @@
     }
   ],
   "accounts": [
+    {
+      "name": "CommitPosition",
+      "discriminator": [
+        144,
+        59,
+        6,
+        201,
+        179,
+        120,
+        138,
+        51
+      ]
+    },
+    {
+      "name": "CommitmentVault",
+      "discriminator": [
+        14,
+        195,
+        87,
+        111,
+        213,
+        201,
+        5,
+        129
+      ]
+    },
     {
       "name": "GroupMarket",
       "discriminator": [
@@ -1165,9 +1882,212 @@
       "code": 6027,
       "name": "GroupCancelTooEarly",
       "msg": "Group can only be cancelled after expiration"
+    },
+    {
+      "code": 6028,
+      "name": "VaultAlreadyLaunched",
+      "msg": "Vault is already launched"
+    },
+    {
+      "code": 6029,
+      "name": "VaultNotLaunched",
+      "msg": "Vault is not yet launched"
+    },
+    {
+      "code": 6030,
+      "name": "CommitPhaseClosed",
+      "msg": "Vault commit phase has not started or already ended"
+    },
+    {
+      "code": 6031,
+      "name": "CommitPhaseNotEnded",
+      "msg": "Vault commit phase has not yet ended"
+    },
+    {
+      "code": 6032,
+      "name": "CommitTooSmall",
+      "msg": "Commit amount below MIN_COMMIT_USDC"
+    },
+    {
+      "code": 6033,
+      "name": "VaultBelowMinTotal",
+      "msg": "Vault total below min_total threshold"
+    },
+    {
+      "code": 6034,
+      "name": "InvalidCommitDuration",
+      "msg": "Invalid commit duration: must be 1 min ≤ d ≤ 7 days"
+    },
+    {
+      "code": 6035,
+      "name": "InvalidMarketDuration",
+      "msg": "Invalid market duration: must be 5 min ≤ d ≤ 30 days"
+    },
+    {
+      "code": 6036,
+      "name": "AlreadyClaimed",
+      "msg": "Commit position already claimed"
+    },
+    {
+      "code": 6037,
+      "name": "RefundNotAvailable",
+      "msg": "Refund only available if vault is unlaunched and either commit ended below threshold OR commit ended without launch"
+    },
+    {
+      "code": 6038,
+      "name": "NoCommitFunds",
+      "msg": "Commit position has no funds to claim or refund"
     }
   ],
   "types": [
+    {
+      "name": "CommitPosition",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "vault",
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "yes_amount",
+            "type": "u64"
+          },
+          {
+            "name": "no_amount",
+            "type": "u64"
+          },
+          {
+            "name": "claimed",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                16
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "CommitmentVault",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "vault_id",
+            "type": "u64"
+          },
+          {
+            "name": "collateral_mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "name",
+            "docs": [
+              "UTF-8 zero-padded vault name (becomes the launched market's name)."
+            ],
+            "type": {
+              "array": [
+                "u8",
+                64
+              ]
+            }
+          },
+          {
+            "name": "commit_end_ts",
+            "docs": [
+              "When the commit phase ends. After this, no more commits, launch",
+              "becomes available, refund becomes available."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "market_end_ts",
+            "docs": [
+              "Duration of the launched market (added to launch time to get end_ts)."
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "yes_total",
+            "type": "u64"
+          },
+          {
+            "name": "no_total",
+            "type": "u64"
+          },
+          {
+            "name": "commit_count",
+            "type": "u32"
+          },
+          {
+            "name": "min_total",
+            "docs": [
+              "Below this threshold, launch is refused → committers must refund."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "launched",
+            "type": "bool"
+          },
+          {
+            "name": "winning_price_bps",
+            "docs": [
+              "Set at launch to the initial_price_bps computed from the commit ratio.",
+              "Kept for transparency post-launch."
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "market",
+            "docs": [
+              "The launched Market PDA. `Pubkey::default()` pre-launch."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "lp_position",
+            "docs": [
+              "The LpPosition PDA owned by the vault (seeds [b\"lp\", market, vault]).",
+              "Holds the LP shares minted at launch; claim_committer distributes them",
+              "pro-rata. `Pubkey::default()` pre-launch."
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          },
+          {
+            "name": "_reserved",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          }
+        ]
+      }
+    },
     {
       "name": "GroupMarket",
       "type": {

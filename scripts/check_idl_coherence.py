@@ -37,6 +37,16 @@ EXPECTED = {
         "owner", "market", "shares", "collateral_deposited",
         "yes_per_share_checkpoint", "no_per_share_checkpoint", "bump",
     ],
+    "CommitmentVault": [
+        "authority", "vault_id", "collateral_mint", "name",
+        "commit_end_ts", "market_end_ts",
+        "yes_total", "no_total", "commit_count", "min_total",
+        "launched", "winning_price_bps", "market", "lp_position",
+        "bump", "_reserved",
+    ],
+    "CommitPosition": [
+        "vault", "owner", "yes_amount", "no_amount", "claimed", "bump", "_reserved",
+    ],
 }
 
 IDL_PATHS = [

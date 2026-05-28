@@ -161,4 +161,53 @@ pub mod pm_amm {
     pub fn cancel_group_market(ctx: Context<CancelGroupMarket>) -> Result<()> {
         instructions::group::cancel_group_market::handler(ctx)
     }
+
+    // ========================================================================
+    // Commitment Vault (Sprint 22 — permissionless bootstrap)
+    // ========================================================================
+
+    /// Open a new Commitment Vault. Anyone can call. Aggregates crowd commits
+    /// before the market exists; the launch price is computed from the
+    /// commit ratio.
+    pub fn initialize_vault(
+        ctx: Context<InitializeVault>,
+        vault_id: u64,
+        name: String,
+        commit_duration_secs: i64,
+        market_duration_secs: i64,
+        min_total: u64,
+    ) -> Result<()> {
+        instructions::vault::initialize_vault::handler(
+            ctx,
+            vault_id,
+            name,
+            commit_duration_secs,
+            market_duration_secs,
+            min_total,
+        )
+    }
+
+    /// Commit USDC on YES or NO. Anyone, any number of times, until
+    /// commit_end_ts. Min commit: 1 USDC.
+    pub fn vault_commit(ctx: Context<Commit>, side: Side, amount: u64) -> Result<()> {
+        instructions::vault::commit::handler(ctx, side, amount)
+    }
+
+    /// Launch the underlying pm-AMM market once commit_end_ts has passed and
+    /// total ≥ min_total. Permissionless. The caller pays the rent of the
+    /// new Market + mints + vault + Metaplex metadata accounts.
+    pub fn launch_vault_market(ctx: Context<LaunchVaultMarket>, market_id: u64) -> Result<()> {
+        instructions::vault::launch_vault_market::handler(ctx, market_id)
+    }
+
+    /// Committer claims back their USDC after launch. (v1: returns the commit
+    /// 1:1; v2 will distribute LP shares of the launched market pro-rata.)
+    pub fn claim_committer(ctx: Context<ClaimCommitter>) -> Result<()> {
+        instructions::vault::claim_committer::handler(ctx)
+    }
+
+    /// Refund a committer 1:1 if the vault never launched.
+    pub fn refund_commit(ctx: Context<RefundCommit>) -> Result<()> {
+        instructions::vault::refund_commit::handler(ctx)
+    }
 }
