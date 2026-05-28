@@ -64,11 +64,16 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
   };
 
   const handleClaim = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!program || !publicKey || !vault || !vault.market) return;
     setBusy(true);
     try {
-      await runClaimCommitter(program, publicKey, new PublicKey(vault.publicKey));
-      toast.success("Claimed your commit back");
+      await runClaimCommitter(
+        program,
+        publicKey,
+        new PublicKey(vault.publicKey),
+        new PublicKey(vault.market),
+      );
+      toast.success("Minted YES + NO tokens to your wallet");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg.slice(0, 200));
@@ -242,13 +247,14 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
 
                 {vault.isClaimOpen && (
                   <>
-                    <p className="text-[11px] text-muted font-mono uppercase">Claim</p>
+                    <p className="text-[11px] text-muted font-mono uppercase">Claim outcome tokens</p>
                     <p className="text-[11px] text-muted">
-                      Market ended. Withdraw your committed USDC. (v1 returns 1:1; v2 will
-                      distribute LP shares.)
+                      Mint your <strong className="text-text-hi">YES + NO tokens</strong> 1:1 with
+                      your commits. Each winning-side token redeems for 1 USDC via the market post-
+                      resolution; losing-side tokens become worthless.
                     </p>
                     <Button onClick={handleClaim} disabled={busy || !publicKey} className="w-full">
-                      {busy ? "…" : "Claim your USDC"}
+                      {busy ? "…" : "Claim outcome tokens"}
                     </Button>
                   </>
                 )}

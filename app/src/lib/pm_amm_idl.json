@@ -116,6 +116,7 @@
       "accounts": [
         {
           "name": "signer",
+          "writable": true,
           "signer": true
         },
         {
@@ -143,7 +144,7 @@
         {
           "name": "vault_collateral",
           "docs": [
-            "PDA-owned vault collateral ATA."
+            "PDA-owned vault collateral ATA — source of the USDC backing transfer."
           ],
           "writable": true,
           "pda": {
@@ -180,12 +181,212 @@
           "name": "collateral_mint"
         },
         {
-          "name": "user_collateral",
+          "name": "market",
           "docs": [
-            "The committer's USDC ATA (must exist; the caller creates it client-side",
-            "if needed)."
+            "The launched binary market — must match `vault.market`."
           ],
           "writable": true
+        },
+        {
+          "name": "market_vault",
+          "docs": [
+            "Market's USDC vault — destination of the backing transfer."
+          ],
+          "writable": true
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "no_mint",
+          "writable": true
+        },
+        {
+          "name": "user_yes",
+          "docs": [
+            "User's YES ATA — init if missing."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yes_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "user_no",
+          "docs": [
+            "User's NO ATA — init if missing."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "no_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "commit_position",
@@ -215,8 +416,16 @@
           }
         },
         {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
       "args": []
@@ -224,8 +433,10 @@
     {
       "name": "claim_committer_group",
       "docs": [
-        "Committer claims back their USDC from a fully-launched multi-outcome",
-        "vault. v1: 1:1 refund."
+        "Per-leg claim for multi-outcome vault committers (v2): mints leg",
+        "YES tokens 1:1 with their commit on that leg, and transfers the",
+        "backing USDC from the commitment vault to the leg's market vault.",
+        "Call once per leg the committer has stake in."
       ],
       "discriminator": [
         167,
@@ -240,6 +451,7 @@
       "accounts": [
         {
           "name": "signer",
+          "writable": true,
           "signer": true
         },
         {
@@ -313,8 +525,140 @@
           "name": "collateral_mint"
         },
         {
-          "name": "user_collateral",
+          "name": "group_market",
+          "docs": [
+            "The wrapping GroupMarket — verified against vault.group_market."
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  111,
+                  117,
+                  112
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "group_market.group_id",
+                "account": "GroupMarket"
+              }
+            ]
+          }
+        },
+        {
+          "name": "market",
+          "docs": [
+            "Leg `leg_index`'s binary market — verified against group.legs[i]."
+          ],
           "writable": true
+        },
+        {
+          "name": "market_vault",
+          "docs": [
+            "Leg market's USDC vault — destination of the backing transfer."
+          ],
+          "writable": true
+        },
+        {
+          "name": "yes_mint",
+          "writable": true
+        },
+        {
+          "name": "user_yes",
+          "docs": [
+            "User's YES ATA for this leg — init if missing."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "signer"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "yes_mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
         },
         {
           "name": "commit_position",
@@ -350,11 +694,24 @@
           }
         },
         {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
         }
       ],
-      "args": []
+      "args": [
+        {
+          "name": "leg_index",
+          "type": "u8"
+        }
+      ]
     },
     {
       "name": "claim_lp_residuals",
@@ -2846,6 +3203,16 @@
       "code": 6044,
       "name": "InvalidLegName",
       "msg": "Invalid leg name: must be 1-32 bytes"
+    },
+    {
+      "code": 6045,
+      "name": "InvalidMarket",
+      "msg": "Market account does not match the one stored on the vault"
+    },
+    {
+      "code": 6046,
+      "name": "InvalidVault",
+      "msg": "Market vault token account does not match market.vault"
     }
   ],
   "types": [

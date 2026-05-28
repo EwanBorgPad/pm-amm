@@ -129,12 +129,40 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
     }
   };
 
+  /** Per-leg claim orchestration: loop over each leg and call the per-leg
+   *  claim_committer_group. Skip legs where the user has no commit (the
+   *  on-chain ix returns `NoCommitFunds` which we silently swallow). */
   const handleClaim = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!program || !publicKey || !vault || !linkedGroup) return;
+    const groupPda = new PublicKey(vault.groupMarket);
+    const vaultPda = new PublicKey(vault.publicKey);
     setBusy(true);
+    let claimed = 0;
     try {
-      await runClaimCommitterGroup(program, publicKey, new PublicKey(vault.publicKey));
-      toast.success("Claimed your commit back");
+      for (let i = 0; i < linkedGroup.legCount; i++) {
+        const legPk = linkedGroup.legPubkeys[i];
+        if (!legPk) continue;
+        const legMarketPda = new PublicKey(legPk);
+        try {
+          await runClaimCommitterGroup(
+            program,
+            publicKey,
+            vaultPda,
+            groupPda,
+            legMarketPda,
+            i,
+          );
+          claimed += 1;
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (msg.includes("NoCommitFunds") || msg.includes("AlreadyClaimed")) {
+            // user has no stake in this leg, or already claimed — skip
+            continue;
+          }
+          throw e;
+        }
+      }
+      toast.success(`Minted YES tokens for ${claimed} leg${claimed === 1 ? "" : "s"}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg.slice(0, 200));
@@ -322,13 +350,15 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
 
                 {vault.isClaimOpen && (
                   <>
-                    <p className="text-[11px] text-muted font-mono uppercase">Claim</p>
+                    <p className="text-[11px] text-muted font-mono uppercase">Claim outcome tokens</p>
                     <p className="text-[11px] text-muted">
-                      Market ended. Withdraw your committed USDC. (v1 returns 1:1; v2 will
-                      distribute LP shares of each leg.)
+                      Mint your <strong className="text-text-hi">YES tokens</strong> for each leg you
+                      committed on, 1:1 with your USDC commit. After resolution, the winning leg's
+                      YES tokens redeem for 1 USDC each via the market; losing legs' tokens are
+                      worthless.
                     </p>
                     <Button onClick={handleClaim} disabled={busy || !publicKey} className="w-full">
-                      {busy ? "…" : "Claim your USDC"}
+                      {busy ? "…" : "Claim YES tokens"}
                     </Button>
                   </>
                 )}

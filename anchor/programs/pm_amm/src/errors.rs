@@ -96,4 +96,8 @@ pub enum PmAmmError {
     VaultGroupNotInitialized,
     #[msg("Invalid leg name: must be 1-32 bytes")]
     InvalidLegName,
+    #[msg("Market account does not match the one stored on the vault")]
+    InvalidMarket,
+    #[msg("Market vault token account does not match market.vault")]
+    InvalidVault,
 }

@@ -11,8 +11,9 @@
  * generated IDL TS types lag the on-chain struct between `anchor build` runs.
  */
 
-import { ComputeBudgetProgram, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
@@ -220,38 +221,41 @@ export async function runLaunchVaultGroupLeg(
   return { marketId, marketPda: marketPda.toBase58() };
 }
 
+/** Multi-outcome v2 per-leg claim — mints leg `legIndex`'s YES tokens to
+ *  the user and transfers the backing USDC from commitment vault to that
+ *  leg's market vault. Call once per leg the committer has stake in. */
 export async function runClaimCommitterGroup(
   program: AnchorProgram,
   wallet: PublicKey,
   vaultPda: PublicKey,
+  groupPda: PublicKey,
+  legMarketPda: PublicKey,
+  legIndex: number,
 ): Promise<void> {
   const vaultCollateral = deriveVaultGroupCollateralPda(vaultPda, program);
-  const userCollateral = await getAssociatedTokenAddress(USDC_MINT, wallet);
   const commitPosition = deriveCommitGroupPositionPda(vaultPda, wallet, program);
-
-  const preIxs: ReturnType<typeof ComputeBudgetProgram.setComputeUnitLimit>[] = [
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-  ];
-  const ataInfo = await program.provider.connection.getAccountInfo(userCollateral);
-  if (!ataInfo) {
-    const tx = new Transaction().add(
-      createAssociatedTokenAccountInstruction(wallet, userCollateral, wallet, USDC_MINT),
-    );
-    await program.provider.sendAndConfirm(tx, []);
-  }
+  const yesMint = deriveYesMint(legMarketPda);
+  const marketVault = deriveVault(legMarketPda);
+  const userYes = await getAssociatedTokenAddress(yesMint, wallet);
 
   await program.methods
-    .claimCommitterGroup()
+    .claimCommitterGroup(legIndex)
     .accountsPartial({
       signer: wallet,
       vault: vaultPda,
       vaultCollateral,
       collateralMint: USDC_MINT,
-      userCollateral,
+      groupMarket: groupPda,
+      market: legMarketPda,
+      marketVault,
+      yesMint,
+      userYes,
       commitPosition,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
-    .preInstructions(preIxs)
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
     .rpc();
 }
 

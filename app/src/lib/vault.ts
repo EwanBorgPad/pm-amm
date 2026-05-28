@@ -11,8 +11,9 @@
  * generated IDL TS types lag the on-chain struct between `anchor build` runs.
  */
 
-import { ComputeBudgetProgram, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, PublicKey, SystemProgram } from "@solana/web3.js";
 import {
+  ASSOCIATED_TOKEN_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountInstruction,
   getAssociatedTokenAddress,
@@ -184,26 +185,24 @@ export async function runLaunchVaultMarket(
   return { marketId, marketPda: marketPda.toBase58() };
 }
 
+/** Binary vault v2 claim — mints YES + NO tokens to the user, transfers
+ *  the backing USDC from commitment vault to market vault.
+ *
+ *  Caller must pass the launched `marketPda` (read from `vault.market`).
+ *  YES/NO mints, market vault, and user YES/NO ATAs are derived. */
 export async function runClaimCommitter(
   program: AnchorProgram,
   wallet: PublicKey,
   vaultPda: PublicKey,
+  marketPda: PublicKey,
 ): Promise<void> {
   const vaultCollateral = deriveVaultCollateralPda(vaultPda, program);
-  const userCollateral = await getAssociatedTokenAddress(USDC_MINT, wallet);
   const commitPosition = deriveCommitPositionPda(vaultPda, wallet, program);
-
-  // Ensure ATA exists for the refunded USDC to land.
-  const preIxs: ReturnType<typeof ComputeBudgetProgram.setComputeUnitLimit>[] = [
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-  ];
-  const ataInfo = await program.provider.connection.getAccountInfo(userCollateral);
-  if (!ataInfo) {
-    const tx = new Transaction().add(
-      createAssociatedTokenAccountInstruction(wallet, userCollateral, wallet, USDC_MINT),
-    );
-    await program.provider.sendAndConfirm(tx, []);
-  }
+  const yesMint = deriveYesMint(marketPda);
+  const noMint = deriveNoMint(marketPda);
+  const marketVault = deriveVault(marketPda);
+  const userYes = await getAssociatedTokenAddress(yesMint, wallet);
+  const userNo = await getAssociatedTokenAddress(noMint, wallet);
 
   await program.methods
     .claimCommitter()
@@ -212,11 +211,18 @@ export async function runClaimCommitter(
       vault: vaultPda,
       vaultCollateral,
       collateralMint: USDC_MINT,
-      userCollateral,
+      market: marketPda,
+      marketVault,
+      yesMint,
+      noMint,
+      userYes,
+      userNo,
       commitPosition,
+      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+      systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
-    .preInstructions(preIxs)
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
     .rpc();
 }
 

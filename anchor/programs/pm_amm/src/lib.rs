@@ -267,10 +267,15 @@ pub mod pm_amm {
         instructions::vault::launch_vault_group_leg::handler(ctx, leg_index, market_id)
     }
 
-    /// Committer claims back their USDC from a fully-launched multi-outcome
-    /// vault. v1: 1:1 refund.
-    pub fn claim_committer_group(ctx: Context<ClaimCommitterGroup>) -> Result<()> {
-        instructions::vault::claim_committer_group::handler(ctx)
+    /// Per-leg claim for multi-outcome vault committers (v2): mints leg
+    /// YES tokens 1:1 with their commit on that leg, and transfers the
+    /// backing USDC from the commitment vault to the leg's market vault.
+    /// Call once per leg the committer has stake in.
+    pub fn claim_committer_group(
+        ctx: Context<ClaimCommitterGroup>,
+        leg_index: u8,
+    ) -> Result<()> {
+        instructions::vault::claim_committer_group::handler(ctx, leg_index)
     }
 
     /// Refund a committer 1:1 if the multi-outcome vault never launched.
