@@ -32,6 +32,7 @@
     "dev": "tsup --watch",
     "type-check": "tsc --noEmit",
     "smoke": "node test/smoke.cjs",
+    "prepare": "tsup",
     "prepublishOnly": "pnpm run build"
   },
   "keywords": [
