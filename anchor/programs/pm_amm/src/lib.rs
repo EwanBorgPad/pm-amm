@@ -239,11 +239,7 @@ pub mod pm_amm {
 
     /// Commit USDC on a specific leg of a multi-outcome vault. Same rules as
     /// `vault_commit`: anyone, any number of times, until commit_end_ts.
-    pub fn vault_commit_group(
-        ctx: Context<CommitGroup>,
-        leg_index: u8,
-        amount: u64,
-    ) -> Result<()> {
+    pub fn vault_commit_group(ctx: Context<CommitGroup>, leg_index: u8, amount: u64) -> Result<()> {
         instructions::vault::vault_commit_group::handler(ctx, leg_index, amount)
     }
 
@@ -271,10 +267,7 @@ pub mod pm_amm {
     /// YES tokens 1:1 with their commit on that leg, and transfers the
     /// backing USDC from the commitment vault to the leg's market vault.
     /// Call once per leg the committer has stake in.
-    pub fn claim_committer_group(
-        ctx: Context<ClaimCommitterGroup>,
-        leg_index: u8,
-    ) -> Result<()> {
+    pub fn claim_committer_group(ctx: Context<ClaimCommitterGroup>, leg_index: u8) -> Result<()> {
         instructions::vault::claim_committer_group::handler(ctx, leg_index)
     }
 

@@ -109,8 +109,11 @@ pub fn handler(ctx: Context<ClaimCommitter>) -> Result<()> {
     // by the commitment vault PDA.
     let vault_id_bytes = vault.vault_id.to_le_bytes();
     let vault_bump = vault.bump;
-    let vault_seeds: &[&[&[u8]]] =
-        &[&[CommitmentVault::SEED, vault_id_bytes.as_ref(), &[vault_bump]]];
+    let vault_seeds: &[&[&[u8]]] = &[&[
+        CommitmentVault::SEED,
+        vault_id_bytes.as_ref(),
+        &[vault_bump],
+    ]];
     let tp = ctx.accounts.token_program.key();
 
     transfer(
@@ -130,8 +133,7 @@ pub fn handler(ctx: Context<ClaimCommitter>) -> Result<()> {
     let market = &ctx.accounts.market;
     let market_id_bytes = market.market_id.to_le_bytes();
     let market_bump = market.bump;
-    let market_seeds: &[&[&[u8]]] =
-        &[&[Market::SEED, market_id_bytes.as_ref(), &[market_bump]]];
+    let market_seeds: &[&[&[u8]]] = &[&[Market::SEED, market_id_bytes.as_ref(), &[market_bump]]];
     let market_info = ctx.accounts.market.to_account_info();
 
     if yes_amount > 0 {

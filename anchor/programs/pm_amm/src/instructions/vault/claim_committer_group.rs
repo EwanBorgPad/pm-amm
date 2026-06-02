@@ -117,8 +117,11 @@ pub fn handler(ctx: Context<ClaimCommitterGroup>, leg_index: u8) -> Result<()> {
     // Phase 1: USDC commitment_vault → leg market_vault (vault PDA signs).
     let vault_id_bytes = vault.vault_id.to_le_bytes();
     let vault_bump = vault.bump;
-    let vault_seeds: &[&[&[u8]]] =
-        &[&[CommitmentVaultGroup::SEED, vault_id_bytes.as_ref(), &[vault_bump]]];
+    let vault_seeds: &[&[&[u8]]] = &[&[
+        CommitmentVaultGroup::SEED,
+        vault_id_bytes.as_ref(),
+        &[vault_bump],
+    ]];
     let tp = ctx.accounts.token_program.key();
 
     transfer(
@@ -138,8 +141,7 @@ pub fn handler(ctx: Context<ClaimCommitterGroup>, leg_index: u8) -> Result<()> {
     let market = &ctx.accounts.market;
     let market_id_bytes = market.market_id.to_le_bytes();
     let market_bump = market.bump;
-    let market_seeds: &[&[&[u8]]] =
-        &[&[Market::SEED, market_id_bytes.as_ref(), &[market_bump]]];
+    let market_seeds: &[&[&[u8]]] = &[&[Market::SEED, market_id_bytes.as_ref(), &[market_bump]]];
 
     token::mint_to(
         CpiContext::new_with_signer(

@@ -102,11 +102,7 @@ pub struct LaunchVaultGroupLeg<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
-pub fn handler(
-    ctx: Context<LaunchVaultGroupLeg>,
-    leg_index: u8,
-    market_id: u64,
-) -> Result<()> {
+pub fn handler(ctx: Context<LaunchVaultGroupLeg>, leg_index: u8, market_id: u64) -> Result<()> {
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;
 
@@ -205,9 +201,7 @@ pub fn handler(
     // ----- Attach the leg to the group (inline; vault PDA is the authority) -----
     let market_key = ctx.accounts.market.key();
     group.legs[leg_index as usize] = market_key;
-    group.total_seeded_bps = group
-        .total_seeded_bps
-        .saturating_add(clamped_bps as u32);
+    group.total_seeded_bps = group.total_seeded_bps.saturating_add(clamped_bps as u32);
 
     vault.legs_launched = vault.legs_launched.saturating_add(1);
 

@@ -94,9 +94,6 @@ pub fn handler(ctx: Context<RefundCommitGroup>) -> Result<()> {
         total_commit,
     )?;
 
-    msg!(
-        "Refund committer group: {} USDC returned",
-        total_commit
-    );
+    msg!("Refund committer group: {} USDC returned", total_commit);
     Ok(())
 }
