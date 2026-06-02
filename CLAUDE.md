@@ -7,14 +7,15 @@ Built for the $PREDICT hackathon. Deadline: April 26, 2026.
 
 ## Devnet
 
-### Current deployment (Sprint 24 — SDK + clean front + fresh redeploy)
-- **Program ID**: `B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf`
-- **USDC mock mint**: `3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ` (6 decimals, mint authority = `6NG87…`)
+### Current deployment (Sprint 24 — fresh program ID for a clean market base)
+- **Program ID**: `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y`
+- **USDC mock mint**: `3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ` (6 decimals, mint authority = `6NG87…`) — unchanged across redeploys (the mint is independent of the program ID)
 - **Upgrade authority**: `6NG87yZrQw6zH6Au8fHbYcD7Dken5smAzisLeXazpt8E` (single-key — move to multisig before mainnet)
 - **TS SDK**: `@pm-amm/sdk` (`packages/sdk`) — wraps all 26 instructions + PDAs + reads + math; the front consumes it.
-- **Deployer/faucet keypair**: `~/.config/solana/id.json` (= upgrade + mint authority). `pnpm run deploy` upgrades via the program keypair `anchor/target/deploy/pm_amm-keypair.json`.
+- **Deployer/faucet keypair**: `~/.config/solana/id.json` (= upgrade + mint authority). `pnpm run deploy` deploys/upgrades via the program keypair `anchor/target/deploy/pm_amm-keypair.json` (the prior B1fu keypair is backed up at `pm_amm-keypair.B1fu.bak.json`).
 
 ### History (superseded deployments)
+- Sprint 24 first redeploy: program `B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf` (same USDC `3WQ8…`) — replaced by `GV1F…` to reset to an empty market base.
 - Sprint 21 multi-outcome fork: program `Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK`, USDC `EaMPVLBv3TjQNpzKs3oXaXL6XHJ8aVWLGXgtwunY2xGj`.
 - Upstream (Matt's Sprint 20, fully-backed): program `8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj`, USDC `8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A`.
 

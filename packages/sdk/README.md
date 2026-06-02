@@ -36,7 +36,7 @@ provide one). The SDK ships ESM + CJS + types; ESM-via-bundler is the primary pa
 import { Connection, PublicKey } from "@solana/web3.js";
 import { PmAmmClient } from "@pm-amm/sdk";
 
-const PROGRAM_ID = new PublicKey("B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf"); // devnet
+const PROGRAM_ID = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"); // devnet
 const USDC_MINT = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ"); // mock USDC
 
 // Read-only (queries, no signing):

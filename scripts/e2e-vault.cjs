@@ -7,7 +7,7 @@ const { getAssociatedTokenAddress, getAccount } = require("@solana/spl-token");
 const anchor = require("@anchor-lang/core");
 const { PmAmmClient } = require("../packages/sdk/dist/index.cjs");
 
-const PROGRAM = new PublicKey("B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf");
+const PROGRAM = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
 const USDC = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const kp = Keypair.fromSecretKey(

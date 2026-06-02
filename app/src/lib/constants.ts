@@ -1,9 +1,9 @@
 import { PublicKey } from "@solana/web3.js";
 
-// Program ID: defaults to Mattdgn's devnet build; override via env when you
-// deploy your own fork (e.g. for testing the multi-outcome extension).
+// Program ID: defaults to the current pm-AMM devnet deployment.
+// Override via NEXT_PUBLIC_PROGRAM_ID when running against another deploy.
 export const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || "B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf",
+  process.env.NEXT_PUBLIC_PROGRAM_ID || "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y",
 );
 
 // Mock USDC mint on devnet. Override via env when running against a different

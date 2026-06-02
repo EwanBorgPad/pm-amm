@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/mattdgn/pm-amm/actions/workflows/test.yml/badge.svg)](https://github.com/mattdgn/pm-amm/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Solana](https://img.shields.io/badge/Solana-Devnet-9945FF)](https://explorer.solana.com/address/B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf?cluster=devnet)
+[![Solana](https://img.shields.io/badge/Solana-Devnet-9945FF)](https://explorer.solana.com/address/GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y?cluster=devnet)
 [![Anchor](https://img.shields.io/badge/Anchor-1.0-blueviolet)](https://www.anchor-lang.com/)
 
 **First production implementation of the Paradigm pm-AMM on Solana. 100% fidelity to the paper. Uniform LVR in price and time.**
 
 > Based on [*pm-AMM: A Prediction Market AMM*](https://www.paradigm.xyz/2024/11/pm-amm) by Ciamac Moallemi & Dan Robinson (Paradigm, Nov 2024).
 
-**Program ID**: `B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf` ([Devnet Explorer](https://explorer.solana.com/address/B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf?cluster=devnet))
+**Program ID**: `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` ([Devnet Explorer](https://explorer.solana.com/address/GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y?cluster=devnet))
 
 ---
 

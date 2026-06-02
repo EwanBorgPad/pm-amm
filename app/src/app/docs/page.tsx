@@ -41,7 +41,7 @@ export default function DocsPage() {
           <Code>{`import { Connection, PublicKey } from "@solana/web3.js";
 import { PmAmmClient } from "@pm-amm/sdk";
 
-const PROGRAM_ID = new PublicKey("B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf");
+const PROGRAM_ID = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
 const USDC_MINT  = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 
 // read-only

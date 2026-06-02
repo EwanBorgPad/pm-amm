@@ -19,7 +19,7 @@ const {
 const anchor = require("@anchor-lang/core");
 const { PmAmmClient, i80f48ToNumber, priceFromReserves } = require("../packages/sdk/dist/index.cjs");
 
-const PROGRAM = new PublicKey("B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf");
+const PROGRAM = new PublicKey("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
 const USDC = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 function rpc() {
   try {

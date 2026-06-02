@@ -25,7 +25,7 @@ continuous LP yield (dC_t), and permissionless Commitment Vaults (binary + multi
 ## Devnet deployment (current)
 
 ```
-PROGRAM_ID = B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf
+PROGRAM_ID = GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y
 USDC_MINT  = 3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ   // mock USDC, 6 decimals
 ```
 
