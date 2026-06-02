@@ -1,6 +1,10 @@
 {
   "name": "pm-amm",
   "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "cd anchor && anchor build --no-idl --ignore-keys && anchor idl build -o target/idl/pm_amm.json",
     "build:sdk": "pnpm --filter @pm-amm/sdk build",
