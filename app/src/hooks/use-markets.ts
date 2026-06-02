@@ -2,8 +2,9 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { priceFromReserves, i80f48ToNumber } from "@/lib/pm-math";
-import { getReadOnlyProgram, decodeName } from "@/lib/program";
+import { priceFromReserves, i80f48ToNumber } from "@pm-amm/sdk/math";
+import { decodeName } from "@pm-amm/sdk";
+import { getClient } from "@/lib/pm-amm-client";
 
 const bnToNum = (bn: { toString(): string }): number => Number(BigInt(bn.toString()));
 
@@ -43,10 +44,9 @@ export function useMarkets() {
   return useQuery<MarketData[]>({
     queryKey: ["markets"],
     queryFn: async () => {
-      const { accounts } = getReadOnlyProgram(connection);
-      // Filter by new Market account size (443 bytes) to skip old-layout
-      // accounts (379 bytes) left over from earlier devnet deploys.
-      const fetched = await accounts.market.all([{ dataSize: 443 }]);
+      // Filter by current Market account size (443 bytes) to skip any
+      // old-layout accounts left over from earlier devnet deploys.
+      const fetched = await getClient(connection).fetchAllMarkets(443);
 
       return fetched.map((acc) => {
         const m = acc.account;

@@ -1,37 +1,57 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useQueryClient } from "@tanstack/react-query";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useSwapQuote, type SwapMode } from "@/hooks/use-swap-quote";
-import { formatUsdc } from "@/lib/pm-math";
+import { formatUsdc } from "@pm-amm/sdk/math";
+import type { SwapDirection } from "@pm-amm/sdk";
 import type { MarketData } from "@/hooks/use-markets";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 import { PublicKey, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
 import {
-  TOKEN_PROGRAM_ID,
   getAssociatedTokenAddress,
   createAssociatedTokenAccountInstruction,
   createCloseAccountInstruction,
   getAccount,
 } from "@solana/spl-token";
 import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
 import { toast } from "sonner";
 
 const SLIPPAGE_BPS = 100;
 
-export function TradePanel({ market, tokens }: { market: MarketData; tokens: UserTokens | null }) {
+export function TradePanel({
+  market,
+  tokens,
+  presetSide,
+  presetNonce,
+}: {
+  market: MarketData;
+  tokens: UserTokens | null;
+  /** Drives the YES/NO side externally (e.g. group page "Buy YES/NO" leg buttons). */
+  presetSide?: "yes" | "no";
+  /** Bump to re-apply `presetSide` even when its value is unchanged (re-click). */
+  presetNonce?: number;
+}) {
   const [mode, setMode] = useState<SwapMode>("buy");
   const [side, setSide] = useState<"yes" | "no">("yes");
   const [amount, setAmount] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // External "Buy YES/NO" triggers set the side + force buy mode + clear amount.
+  useEffect(() => {
+    if (!presetSide) return;
+    setSide(presetSide);
+    setMode("buy");
+    setAmount("");
+  }, [presetSide, presetNonce]);
+
   const queryClient = useQueryClient();
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
 
   const amountNum = parseFloat(amount) || 0;
@@ -50,19 +70,18 @@ export function TradePanel({ market, tokens }: { market: MarketData; tokens: Use
   const minOutput = quote?.output ? Math.floor(quote.output * (1 - SLIPPAGE_BPS / 10000)) : 0;
 
   const handleTrade = async () => {
-    if (!program || !publicKey || !amount || !quote?.output) return;
+    if (!client || !publicKey || !amount || !quote?.output) return;
     setLoading(true);
     try {
       const marketPda = new PublicKey(market.publicKey);
-      const yesMintPda = deriveYesMint(marketPda);
-      const noMintPda = deriveNoMint(marketPda);
-      const vaultPda = deriveVault(marketPda);
+      const yesMintPda = client.yesMint(marketPda);
+      const noMintPda = client.noMint(marketPda);
       const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
       const userYes = await getAssociatedTokenAddress(yesMintPda, publicKey);
       const userNo = await getAssociatedTokenAddress(noMintPda, publicKey);
 
       // Build ATA creation instructions (if needed) to bundle atomically
-      const conn = program.provider.connection;
+      const conn = client.connection;
       const preIxs: TransactionInstruction[] = [
         ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
       ];
@@ -80,16 +99,14 @@ export function TradePanel({ market, tokens }: { market: MarketData; tokens: Use
         }
       }
 
-      const direction =
+      const direction: SwapDirection =
         mode === "buy"
           ? side === "yes"
-            ? { usdcToYes: {} }
-            : { usdcToNo: {} }
+            ? "usdcToYes"
+            : "usdcToNo"
           : side === "yes"
-            ? { yesToUsdc: {} }
-            : { noToUsdc: {} };
-
-      const BN = (await import("@anchor-lang/core")).BN;
+            ? "yesToUsdc"
+            : "noToUsdc";
       const lamports = Math.floor(amountNum * 1e6);
 
       // Close ATAs that remain empty after swap (cleanup wallet, recover rent)
@@ -102,24 +119,16 @@ export function TradePanel({ market, tokens }: { market: MarketData; tokens: Use
         postIxs.push(createCloseAccountInstruction(emptyAta, publicKey, publicKey));
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Anchor IDL types require cast
-      const tx = await (program.methods as any)
-        .swap(direction, new BN(lamports), new BN(minOutput))
-        .accounts({
-          signer: publicKey,
-          market: marketPda,
-          collateralMint: USDC_MINT,
-          yesMint: yesMintPda,
-          noMint: noMintPda,
-          vault: vaultPda,
-          userCollateral: userUsdc,
-          userYes: userYes,
-          userNo: userNo,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions(preIxs)
-        .postInstructions(postIxs)
-        .rpc();
+      // Build the swap ix via the SDK, then compose our own tx so the pre/post
+      // ATA create + close-empty behavior is preserved.
+      const swapIx = await client.ix.swap({
+        signer: publicKey,
+        market: marketPda,
+        direction,
+        amountIn: lamports,
+        minOutput,
+      });
+      const tx = await client.sendIxs([...preIxs, swapIx, ...postIxs]);
 
       // Refetch markets to get post-trade price, then snap it
       const data = await queryClient.fetchQuery({ queryKey: ["markets"], staleTime: 0 });

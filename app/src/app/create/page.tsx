@@ -1,11 +1,5 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builders use `(program.methods as any)` because the
- * generated IDL TS types lag the on-chain struct between `anchor build` runs.
- * Read-only paths use the typed namespace from `@/lib/program`.
- */
-
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
@@ -13,12 +7,9 @@ import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
-import { useProgram } from "@/hooks/use-program";
-import { PublicKey, ComputeBudgetProgram, SystemProgram, Transaction } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import { USDC_MINT, METAPLEX_PROGRAM_ID, solscanTxUrl } from "@/lib/constants";
-import { formatUsdc, expectedDailyLvr, poolValue, phi, phiInv } from "@/lib/pm-math";
-import { BN } from "@anchor-lang/core";
+import { useClient } from "@/lib/pm-amm-client";
+import { solscanTxUrl } from "@/lib/constants";
+import { formatUsdc, expectedDailyLvr, poolValue, phi, phiInv } from "@pm-amm/sdk/math";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -31,7 +22,7 @@ export default function CreateMarketPage() {
   // Sent on-chain as basis points (5000 = 50%).
   const [initialPricePct, setInitialPricePct] = useState("50");
   const [loading, setLoading] = useState(false);
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const router = useRouter();
 
@@ -58,7 +49,7 @@ export default function CreateMarketPage() {
   const expectedLoss = liqLamports - expectedReturn;
 
   const handleCreate = async () => {
-    if (!program || !publicKey || !name) return;
+    if (!client || !publicKey || !name) return;
     setLoading(true);
     try {
       if (durSeconds < 360) {
@@ -66,94 +57,21 @@ export default function CreateMarketPage() {
         setLoading(false);
         return;
       }
-      const endTs = Math.floor(Date.now() / 1000) + Math.floor(durSeconds);
-      const marketId = Date.now() % 1_000_000_000;
-
-      const [marketPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("market"), new BN(marketId).toArrayLike(Buffer, "le", 8)],
-        program.programId,
-      );
-      const [yesMint] = PublicKey.findProgramAddressSync(
-        [Buffer.from("yes_mint"), marketPda.toBuffer()],
-        program.programId,
-      );
-      const [noMint] = PublicKey.findProgramAddressSync(
-        [Buffer.from("no_mint"), marketPda.toBuffer()],
-        program.programId,
-      );
-      const [vault] = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), marketPda.toBuffer()],
-        program.programId,
-      );
-
-      const TOKEN_METADATA_PROGRAM = METAPLEX_PROGRAM_ID;
-      const [yesMetadata] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), yesMint.toBuffer()],
-        TOKEN_METADATA_PROGRAM,
-      );
-      const [noMetadata] = PublicKey.findProgramAddressSync(
-        [Buffer.from("metadata"), TOKEN_METADATA_PROGRAM.toBuffer(), noMint.toBuffer()],
-        TOKEN_METADATA_PROGRAM,
-      );
-
-      // Convert percent → basis points. Default 50% → 5000 bps.
-      // The program accepts 0 (legacy 50/50) or 100..=9900 (1%..99%).
+      // percent → basis points. 50% → 5000 bps. The program accepts 0 (legacy
+      // 50/50) or 100..=9900 (1%..99%). One SDK call builds init + deposit.
       const initialPriceBps = Math.round(seedPct * 100);
-
-      // Build initialize_market + (optional) deposit_liquidity into a single
-      // transaction so the user only sees one Phantom prompt.
-      const initIx = await (program.methods as any)
-        .initializeMarket(new BN(marketId), new BN(endTs), name, initialPriceBps)
-        .accounts({
-          authority: publicKey,
-          market: marketPda,
-          collateralMint: USDC_MINT,
-          yesMint,
-          noMint,
-          vault,
-          yesMetadata,
-          noMetadata,
-          tokenMetadataProgram: TOKEN_METADATA_PROGRAM,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          rent: new PublicKey("SysvarRent111111111111111111111111111111111"),
-        })
-        .instruction();
-
-      const tx = new Transaction().add(
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-        initIx,
-      );
-
-      if (liquidity > 0) {
-        const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-        const [lpPda] = PublicKey.findProgramAddressSync(
-          [Buffer.from("lp"), marketPda.toBuffer(), publicKey.toBuffer()],
-          program.programId,
-        );
-        const depositIx = await (program.methods as any)
-          .depositLiquidity(new BN(Math.floor(liqLamports)))
-          .accounts({
-            signer: publicKey,
-            market: marketPda,
-            collateralMint: USDC_MINT,
-            vault,
-            userCollateral: userUsdc,
-            lpPosition: lpPda,
-            systemProgram: SystemProgram.programId,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .instruction();
-        tx.add(depositIx);
-      }
-
-      const sig = await (program.provider as any).sendAndConfirm(tx, []);
+      const { marketId, signature } = await client.send.createMarket({
+        name,
+        durationSecs: Math.floor(durSeconds),
+        initialPriceBps,
+        depositUsdc: liquidity > 0 ? liquidity : undefined,
+      });
       toast.success("Market created", {
         description:
           liquidity > 0 ? `ID: ${marketId} · Deposited ${liquidity} USDC` : `ID: ${marketId}`,
         action: {
           label: "Solscan ↗",
-          onClick: () => window.open(solscanTxUrl(sig), "_blank"),
+          onClick: () => window.open(solscanTxUrl(signature), "_blank"),
         },
       });
 
@@ -178,7 +96,7 @@ export default function CreateMarketPage() {
       <StatusBar />
       <main className="flex-1 max-w-2xl mx-auto w-full px-[48px] py-[32px]">
         <Link
-          href="/"
+          href="/markets"
           className="text-[12px] text-muted hover:text-text-hi transition-all duration-[120ms] mb-[16px] block font-mono tracking-[0.03em]"
         >
           ← BACK

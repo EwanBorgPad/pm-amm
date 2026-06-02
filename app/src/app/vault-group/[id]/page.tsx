@@ -7,19 +7,12 @@ import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
 import { MetaRow } from "@/components/ui/meta-row";
 import { Countdown } from "@/components/ui/countdown";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useMarkets } from "@/hooks/use-markets";
 import { useGroups } from "@/hooks/use-groups";
 import { useVaultGroup } from "@/hooks/use-vault-groups";
-import {
-  runVaultCommitGroup,
-  runLaunchVaultGroupMarket,
-  runLaunchVaultGroupLeg,
-  runClaimCommitterGroup,
-  runRefundCommitGroup,
-} from "@/lib/vault_group";
 import { solscanAccountUrl } from "@/lib/constants";
-import { formatUsdc } from "@/lib/pm-math";
+import { formatUsdc } from "@pm-amm/sdk/math";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -28,7 +21,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
   const { data: vault, isLoading, refetch } = useVaultGroup(Number(id));
   const { data: markets } = useMarkets();
   const { data: groups = [] } = useGroups(markets);
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
 
   /** Find the GroupMarket linked to this vault — needed to compute the
@@ -47,7 +40,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
   );
 
   const handleCommit = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     const num = parseFloat(amount || "0");
     if (num < 1) {
       toast.error("Minimum commit: 1 USDC");
@@ -55,13 +48,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
     }
     setBusy(true);
     try {
-      await runVaultCommitGroup(
-        program,
-        publicKey,
-        new PublicKey(vault.publicKey),
-        selectedLeg,
-        num,
-      );
+      await client.send.vaultCommitGroup(new PublicKey(vault.publicKey), selectedLeg, num);
       toast.success(`Committed ${num} USDC on ${vault.legs[selectedLeg].name}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -74,7 +61,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
   /** Single-button orchestration: 1 tx for GroupMarket + N tx for legs.
    *  Skips steps already completed (idempotent — safe to retry). */
   const handleLaunchAll = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     const total = 1 + vault.legCount;
     setBusy(true);
     setLaunchProgress({ done: 0, total });
@@ -82,11 +69,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
       // Step 1: GroupMarket (skip if already initialized)
       let groupPubkey: PublicKey;
       if (!vault.groupMarketInitialized) {
-        const r = await runLaunchVaultGroupMarket(
-          program,
-          publicKey,
-          new PublicKey(vault.publicKey),
-        );
+        const r = await client.send.launchVaultGroupMarket(new PublicKey(vault.publicKey));
         groupPubkey = new PublicKey(r.groupPda);
         toast.success(`GroupMarket created (${r.groupId})`);
       } else {
@@ -99,9 +82,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
       let done = 1;
       for (const leg of vault.legs) {
         try {
-          await runLaunchVaultGroupLeg(
-            program,
-            publicKey,
+          await client.send.launchVaultGroupLeg(
             new PublicKey(vault.publicKey),
             groupPubkey,
             leg.index,
@@ -133,7 +114,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
    *  claim_committer_group. Skip legs where the user has no commit (the
    *  on-chain ix returns `NoCommitFunds` which we silently swallow). */
   const handleClaim = async () => {
-    if (!program || !publicKey || !vault || !linkedGroup) return;
+    if (!client || !publicKey || !vault || !linkedGroup) return;
     const groupPda = new PublicKey(vault.groupMarket);
     const vaultPda = new PublicKey(vault.publicKey);
     setBusy(true);
@@ -144,14 +125,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
         if (!legPk) continue;
         const legMarketPda = new PublicKey(legPk);
         try {
-          await runClaimCommitterGroup(
-            program,
-            publicKey,
-            vaultPda,
-            groupPda,
-            legMarketPda,
-            i,
-          );
+          await client.send.claimCommitterGroup(vaultPda, groupPda, legMarketPda, i);
           claimed += 1;
         } catch (e: unknown) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -172,10 +146,10 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
   };
 
   const handleRefund = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     setBusy(true);
     try {
-      await runRefundCommitGroup(program, publicKey, new PublicKey(vault.publicKey));
+      await client.send.refundCommitGroup(new PublicKey(vault.publicKey));
       toast.success("Refund successful");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -189,7 +163,7 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
     <>
       <StatusBar />
       <main className="flex-1 max-w-3xl mx-auto w-full px-[24px] py-[32px]">
-        <Link href="/" className="text-[12px] text-muted mb-[16px] block font-mono">
+        <Link href="/markets" className="text-[12px] text-muted mb-[16px] block font-mono">
           ← BACK
         </Link>
 
@@ -350,12 +324,14 @@ export default function VaultGroupPage({ params }: { params: Promise<{ id: strin
 
                 {vault.isClaimOpen && (
                   <>
-                    <p className="text-[11px] text-muted font-mono uppercase">Claim outcome tokens</p>
+                    <p className="text-[11px] text-muted font-mono uppercase">
+                      Claim outcome tokens
+                    </p>
                     <p className="text-[11px] text-muted">
-                      Mint your <strong className="text-text-hi">YES tokens</strong> for each leg you
-                      committed on, 1:1 with your USDC commit. After resolution, the winning leg's
-                      YES tokens redeem for 1 USDC each via the market; losing legs' tokens are
-                      worthless.
+                      Mint your <strong className="text-text-hi">YES tokens</strong> for each leg
+                      you committed on, 1:1 with your USDC commit. After resolution, the winning
+                      leg's YES tokens redeem for 1 USDC each via the market; losing legs' tokens
+                      are worthless.
                     </p>
                     <Button onClick={handleClaim} disabled={busy || !publicKey} className="w-full">
                       {busy ? "…" : "Claim YES tokens"}

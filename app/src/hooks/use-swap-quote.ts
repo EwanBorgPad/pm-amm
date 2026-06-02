@@ -8,12 +8,11 @@ import {
   Transaction,
   type TransactionInstruction,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import { BN } from "@anchor-lang/core";
+import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
-import { getReadOnlyProgram } from "@/lib/program";
-import { estimateSwapOutput } from "@/lib/pm-math";
+import { getClient } from "@/lib/pm-amm-client";
+import { estimateSwapOutput } from "@pm-amm/sdk/math";
+import type { SwapDirection } from "@pm-amm/sdk";
 
 export type SwapMode = "buy" | "sell";
 
@@ -108,14 +107,9 @@ async function tryOnChainQuote(
 ): Promise<SwapQuote | null> {
   try {
     const market = new PublicKey(marketPda);
-    // Use the helper so the IDL address matches the env-driven PROGRAM_ID
-    // (the JSON ships with localnet; without the helper override the
-    // simulated tx targets the wrong program on devnet).
-    const { program } = getReadOnlyProgram(connection);
-
-    const yesMint = deriveYesMint(market);
-    const noMint = deriveNoMint(market);
-    const vault = deriveVault(market);
+    const client = getClient(connection);
+    const yesMint = client.yesMint(market);
+    const noMint = client.noMint(market);
 
     const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
     const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
@@ -149,32 +143,24 @@ async function tryOnChainQuote(
       /* ATA doesn't exist yet */
     }
 
-    // Direction
-    let direction: Record<string, Record<string, never>>;
-    if (mode === "buy") {
-      direction = side === "yes" ? { usdcToYes: {} } : { usdcToNo: {} };
-    } else {
-      direction = side === "yes" ? { yesToUsdc: {} } : { noToUsdc: {} };
-    }
+    const direction: SwapDirection =
+      mode === "buy"
+        ? side === "yes"
+          ? "usdcToYes"
+          : "usdcToNo"
+        : side === "yes"
+          ? "yesToUsdc"
+          : "noToUsdc";
 
     const lamports = mode === "buy" ? Math.floor(amount * 1e6) : Math.floor(amount);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const ix = await (program.methods as any)
-      .swap(direction, new BN(lamports), new BN(0))
-      .accounts({
-        signer: publicKey,
-        market,
-        collateralMint: USDC_MINT,
-        yesMint,
-        noMint,
-        vault,
-        userCollateral: userUsdc,
-        userYes,
-        userNo,
-        tokenProgram: TOKEN_PROGRAM_ID,
-      })
-      .instruction();
+    const ix = await client.ix.swap({
+      signer: publicKey,
+      market,
+      direction,
+      amountIn: lamports,
+      minOutput: 0,
+    });
 
     const tx = new Transaction().add(
       ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),

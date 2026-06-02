@@ -9,11 +9,11 @@ import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useMarkets } from "@/hooks/use-markets";
 import { useIncompleteUserGroups, type GroupData } from "@/hooks/use-groups";
-import { runCreateGroup, cancelGroupMarket, type GroupCreateInput } from "@/lib/create-group";
+import type { GroupCreateInput } from "@pm-amm/sdk";
 
 const MIN_LEGS = 2;
 const MAX_LEGS = 32;
@@ -30,7 +30,7 @@ export default function CreateGroupPage() {
 
   const [step, setStep] = useState<{ label: string; index: number } | null>(null);
 
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const router = useRouter();
 
@@ -39,12 +39,19 @@ export default function CreateGroupPage() {
   const [cancellingId, setCancellingId] = useState<number | null>(null);
 
   const onCancel = async (group: GroupData) => {
-    if (!program) return;
+    if (!client) return;
     setCancellingId(group.groupId);
     try {
-      await cancelGroupMarket(program, new PublicKey(group.publicKey));
+      const DEFAULT = "11111111111111111111111111111111";
+      const legMarkets = group.legPubkeys.map((pk) => (pk === DEFAULT ? null : new PublicKey(pk)));
+      // winningLeg null = cancel; the flow also cascades attached legs to NO.
+      await client.flows.resolveGroup({
+        group: new PublicKey(group.publicKey),
+        legMarkets,
+        winningLeg: null,
+      });
       toast.success(`Group #${group.groupId} cancelled`, {
-        description: "Attached legs can now be finalized as Side::No.",
+        description: "Attached legs finalized as Side::No.",
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -78,26 +85,22 @@ export default function CreateGroupPage() {
   };
 
   const onSubmit = async () => {
-    if (!program || !publicKey) return;
+    if (!client || !publicKey) return;
     if (!name.trim()) return toast.error("Group name required");
     if (durSecs < 360) return toast.error("Duration too short (min 6 min)");
     if (budget < 0.01) return toast.error("Budget per leg too small");
 
     const input: GroupCreateInput = {
       name: name.trim(),
-      legCount,
       legNames,
       durationSecs: Math.floor(durSecs),
       budgetPerLegUsdc: budget,
     };
 
     try {
-      const result = await runCreateGroup({
-        program,
-        wallet: publicKey,
-        input,
-        onProgress: (label, index) => setStep({ label, index }),
-      });
+      const result = await client.flows.createGroup(input, (label, index) =>
+        setStep({ label, index }),
+      );
       setStep(null);
       toast.success(`Group #${result.groupId} created`, {
         description: `${legCount} legs at ${(seedBps / 100).toFixed(2)}% each`,

@@ -10,7 +10,7 @@
 import * as anchor from "@anchor-lang/core";
 import { PublicKey, TransactionInstruction, Transaction } from "@solana/web3.js";
 
-const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
+const USDC_MINT = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 const TOKEN_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 const URI =
   "https://raw.githubusercontent.com/Mattdgn/pm-amm/main/app/public/tokens/usdc-mock.json";

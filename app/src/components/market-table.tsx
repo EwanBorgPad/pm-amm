@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Countdown } from "@/components/ui/countdown";
-import { formatUsdc, poolValue } from "@/lib/pm-math";
+import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
 import type { MarketData } from "@/hooks/use-markets";
 import type { GroupData } from "@/hooks/use-groups";
 

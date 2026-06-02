@@ -1,0 +1,10 @@
+# pnpm workspace.
+#
+# The SDK (`packages/sdk`) is consumed by the Next.js `app` via the
+# `workspace:*` protocol. The `anchor/` package is intentionally kept OUT of
+# the workspace: it ships its own node_modules + lockfile, and its ts-mocha /
+# ts-node integration-test toolchain is sensitive to dependency hoisting. If a
+# seed script later needs to import `@pm-amm/sdk`, add `anchor` here then.
+packages:
+  - "app"
+  - "packages/*"

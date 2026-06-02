@@ -4,8 +4,9 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
 import type { MarketData } from "@/hooks/use-markets";
-import { sumProbabilities } from "@/lib/pm-math";
-import { getReadOnlyProgram, type GroupMarketAccount, decodeName } from "@/lib/program";
+import { sumProbabilities } from "@pm-amm/sdk/math";
+import { decodeName, type GroupMarketAccount } from "@pm-amm/sdk";
+import { getClient } from "@/lib/pm-amm-client";
 
 /** GroupMarket binary account size (matches state.rs::GroupMarket::LEN). */
 const GROUP_ACCOUNT_SIZE = 1188;
@@ -58,8 +59,7 @@ export function useGroups(markets: MarketData[] | undefined) {
     queryKey: ["groups", markets?.length ?? 0],
     enabled: markets !== undefined,
     queryFn: async () => {
-      const { accounts } = getReadOnlyProgram(connection);
-      const fetched = await accounts.groupMarket.all([{ dataSize: GROUP_ACCOUNT_SIZE }]);
+      const fetched = await getClient(connection).fetchAllGroups(GROUP_ACCOUNT_SIZE);
       return fetched.map((acc) =>
         buildGroupData(acc.publicKey.toBase58(), acc.account, marketByPubkey),
       );

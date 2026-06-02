@@ -7,23 +7,17 @@ import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
 import { MetaRow } from "@/components/ui/meta-row";
 import { Countdown } from "@/components/ui/countdown";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useVault } from "@/hooks/use-vaults";
-import {
-  runVaultCommit,
-  runLaunchVaultMarket,
-  runClaimCommitter,
-  runRefundCommit,
-} from "@/lib/vault";
 import { solscanAccountUrl } from "@/lib/constants";
-import { formatUsdc } from "@/lib/pm-math";
+import { formatUsdc } from "@pm-amm/sdk/math";
 import { toast } from "sonner";
 import Link from "next/link";
 
 export default function VaultPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: vault, isLoading } = useVault(Number(id));
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
 
   const [amount, setAmount] = useState("5");
@@ -31,7 +25,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
   const [busy, setBusy] = useState(false);
 
   const handleCommit = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     const num = parseFloat(amount || "0");
     if (num < 1) {
       toast.error("Minimum commit: 1 USDC");
@@ -39,7 +33,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     }
     setBusy(true);
     try {
-      await runVaultCommit(program, publicKey, new PublicKey(vault.publicKey), side, num);
+      await client.send.vaultCommit(new PublicKey(vault.publicKey), side, num);
       toast.success(`Committed ${num} USDC on ${side.toUpperCase()}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -50,10 +44,10 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
   };
 
   const handleLaunch = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     setBusy(true);
     try {
-      const r = await runLaunchVaultMarket(program, publicKey, new PublicKey(vault.publicKey));
+      const r = await client.send.launchVaultMarket(new PublicKey(vault.publicKey));
       toast.success(`Market ${r.marketId} launched at ${(vault.impliedPrice * 100).toFixed(2)}%`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -64,15 +58,10 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
   };
 
   const handleClaim = async () => {
-    if (!program || !publicKey || !vault || !vault.market) return;
+    if (!client || !publicKey || !vault || !vault.market) return;
     setBusy(true);
     try {
-      await runClaimCommitter(
-        program,
-        publicKey,
-        new PublicKey(vault.publicKey),
-        new PublicKey(vault.market),
-      );
+      await client.send.claimCommitter(new PublicKey(vault.publicKey), new PublicKey(vault.market));
       toast.success("Minted YES + NO tokens to your wallet");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -83,10 +72,10 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
   };
 
   const handleRefund = async () => {
-    if (!program || !publicKey || !vault) return;
+    if (!client || !publicKey || !vault) return;
     setBusy(true);
     try {
-      await runRefundCommit(program, publicKey, new PublicKey(vault.publicKey));
+      await client.send.refundCommit(new PublicKey(vault.publicKey));
       toast.success("Refund successful");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -100,7 +89,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     <>
       <StatusBar />
       <main className="flex-1 max-w-3xl mx-auto w-full px-[24px] py-[32px]">
-        <Link href="/" className="text-[12px] text-muted mb-[16px] block font-mono">
+        <Link href="/markets" className="text-[12px] text-muted mb-[16px] block font-mono">
           ← BACK
         </Link>
 
@@ -247,7 +236,9 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
 
                 {vault.isClaimOpen && (
                   <>
-                    <p className="text-[11px] text-muted font-mono uppercase">Claim outcome tokens</p>
+                    <p className="text-[11px] text-muted font-mono uppercase">
+                      Claim outcome tokens
+                    </p>
                     <p className="text-[11px] text-muted">
                       Mint your <strong className="text-text-hi">YES + NO tokens</strong> 1:1 with
                       your commits. Each winning-side token redeems for 1 USDC via the market post-

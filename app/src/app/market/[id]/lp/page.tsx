@@ -1,11 +1,5 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builders use `(program.methods as any)` because the
- * generated IDL TS types lag the on-chain struct between `anchor build` runs.
- * Read-only paths use the typed namespace from `@/lib/program`.
- */
-
 import { use, useState } from "react";
 import { StatusBar } from "@/components/layout/status-bar";
 import { Figure } from "@/components/ui/figure";
@@ -18,7 +12,7 @@ import { ResidualsWidget } from "@/components/residuals-widget";
 import { useMarkets } from "@/hooks/use-markets";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { useLpPosition } from "@/hooks/use-lp-position";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -28,21 +22,10 @@ import {
   simulateLpDeposit,
   lpPositionPnl,
   formatTimeRemaining,
-} from "@/lib/pm-math";
-import { deriveYesMint, deriveNoMint } from "@/lib/pda";
-import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
-import {
-  PublicKey,
-  ComputeBudgetProgram,
-  SystemProgram,
-  type TransactionInstruction,
-} from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  getAccount,
-} from "@solana/spl-token";
+} from "@pm-amm/sdk/math";
+import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { PROGRAM_ID, USDC_MINT, solscanTxUrl } from "@/lib/constants";
+import { PublicKey } from "@solana/web3.js";
 import { BN } from "@anchor-lang/core";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -53,12 +36,12 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
   const market = markets?.find((m) => m.marketId === Number(id));
 
   const marketPda = market ? new PublicKey(market.publicKey) : undefined;
-  const yesMint = marketPda ? deriveYesMint(marketPda).toBase58() : undefined;
-  const noMint = marketPda ? deriveNoMint(marketPda).toBase58() : undefined;
+  const yesMint = marketPda ? deriveYesMint(PROGRAM_ID, marketPda).toBase58() : undefined;
+  const noMint = marketPda ? deriveNoMint(PROGRAM_ID, marketPda).toBase58() : undefined;
 
   const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
   const { data: lp } = useLpPosition(market?.publicKey);
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
 
@@ -110,34 +93,10 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
 
   // --- Handlers ---
   const handleDeposit = async () => {
-    if (!program || !publicKey || !depositAmt || !market) return;
+    if (!client || !publicKey || !depositAmt || !market) return;
     setLoading(true);
     try {
-      const mPda = new PublicKey(market.publicKey);
-      const vault = PublicKey.findProgramAddressSync(
-        [Buffer.from("vault"), mPda.toBuffer()],
-        program.programId,
-      )[0];
-      const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-      const [lpPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()],
-        program.programId,
-      );
-
-      const tx = await (program.methods as any)
-        .depositLiquidity(new BN(Math.floor(depositNum * 1e6)))
-        .accounts({
-          signer: publicKey,
-          market: mPda,
-          collateralMint: USDC_MINT,
-          vault,
-          userCollateral: userUsdc,
-          lpPosition: lpPda,
-          systemProgram: SystemProgram.programId,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-        .rpc();
+      const tx = await client.send.depositLiquidity(new PublicKey(market.publicKey), depositNum);
 
       toast.success(`Deposited ${depositNum} USDC`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
@@ -158,50 +117,13 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
   };
 
   const handleWithdraw = async () => {
-    if (!program || !publicKey || !lp || !market) return;
+    if (!client || !publicKey || !lp || !market) return;
     setLoading(true);
     try {
-      const mPda = new PublicKey(market.publicKey);
-      const yMint = deriveYesMint(mPda);
-      const nMint = deriveNoMint(mPda);
-      const userYes = await getAssociatedTokenAddress(yMint, publicKey);
-      const userNo = await getAssociatedTokenAddress(nMint, publicKey);
-      const [lpPda] = PublicKey.findProgramAddressSync(
-        [Buffer.from("lp"), mPda.toBuffer(), publicKey.toBuffer()],
-        program.programId,
-      );
-
-      const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-      ];
-      for (const [ata, mint] of [
-        [userYes, yMint],
-        [userNo, nMint],
-      ] as [PublicKey, PublicKey][]) {
-        try {
-          await getAccount(conn, ata);
-        } catch {
-          preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
-        }
-      }
-
-      const sharesBn = new BN(BigInt(Math.floor(lp.shares * 2 ** 48)).toString());
-      const tx = await (program.methods as any)
-        .withdrawLiquidity(sharesBn)
-        .accounts({
-          signer: publicKey,
-          market: mPda,
-          collateralMint: USDC_MINT,
-          yesMint: yMint,
-          noMint: nMint,
-          lpPosition: lpPda,
-          userYes,
-          userNo,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions(preIxs)
-        .rpc();
+      // Burn the EXACT on-chain shares (raw Q64.64 bits) — the float `lp.shares`
+      // can round above the stored value and trip the on-chain check.
+      const sharesBn = new BN(lp.sharesRaw);
+      const tx = await client.send.withdrawLiquidity(new PublicKey(market.publicKey), sharesBn);
 
       toast.success("Withdrew all liquidity", {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },

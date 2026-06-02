@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useVaults } from "@/hooks/use-vaults";
 import { useVaultGroups } from "@/hooks/use-vault-groups";
 import { Countdown } from "@/components/ui/countdown";
-import { formatUsdc } from "@/lib/pm-math";
+import { formatUsdc } from "@pm-amm/sdk/math";
 
 /** Lightweight section on the home page listing every open vault.
  *  Hidden when nothing is open. */

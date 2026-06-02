@@ -1,31 +1,17 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builders use `(program.methods as any)` because the
- * generated IDL TS types lag the on-chain struct between `anchor build` runs.
- * Read-only paths use the typed namespace from `@/lib/program`.
- */
-
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
 import { Button } from "@/components/ui/button";
 import { Figure } from "@/components/ui/figure";
 import { MetaRow } from "@/components/ui/meta-row";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { usePositionValue } from "@/hooks/use-position-value";
-import { formatUsdc } from "@/lib/pm-math";
+import { formatUsdc } from "@pm-amm/sdk/math";
 import type { MarketData } from "@/hooks/use-markets";
 import type { UserTokens } from "@/hooks/use-user-tokens";
-import { PublicKey, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  getAccount,
-} from "@solana/spl-token";
-import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
-import { BN } from "@anchor-lang/core";
+import { solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
 
 export function PositionCard({
@@ -36,7 +22,7 @@ export function PositionCard({
   tokens: UserTokens | null;
 }) {
   const [loading, setLoading] = useState(false);
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const { data: posValue, isLoading: valueLoading } = usePositionValue(market.publicKey, tokens);
 
@@ -52,29 +38,11 @@ export function PositionCard({
   const losingBalance = winningSide === 1 ? noAmount : winningSide === 2 ? yesAmount : 0;
 
   const handleRedeem = async () => {
-    if (!program || !publicKey || redeemable <= 0) return;
+    if (!client || !publicKey || redeemable <= 0) return;
     setLoading(true);
     try {
-      const marketPda = new PublicKey(market.publicKey);
-      const yesMint = deriveYesMint(marketPda);
-      const noMint = deriveNoMint(marketPda);
-      const vaultPda = deriveVault(marketPda);
-      const tx = await (program.methods as any)
-        .redeemPair(new BN(redeemable))
-        .accounts({
-          signer: publicKey,
-          market: marketPda,
-          collateralMint: USDC_MINT,
-          yesMint: yesMint,
-          noMint: noMint,
-          vault: vaultPda,
-          userYes: new PublicKey(tokens!.yesAta),
-          userNo: new PublicKey(tokens!.noAta),
-          userCollateral: new PublicKey(tokens!.usdcAta),
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-        .rpc();
+      // redeemable is in raw 6-dp micro-units (min of YES/NO balances).
+      const tx = await client.send.redeemPair(new PublicKey(market.publicKey), redeemable);
       toast.success(`Redeemed ${formatUsdc(redeemable)} USDC`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });
@@ -92,48 +60,11 @@ export function PositionCard({
   };
 
   const handleClaimWinnings = async () => {
-    if (!program || !publicKey || !hasPosition) return;
+    if (!client || !publicKey || !hasPosition) return;
     setLoading(true);
     try {
-      const marketPda = new PublicKey(market.publicKey);
-      const yesMint = deriveYesMint(marketPda);
-      const noMint = deriveNoMint(marketPda);
-      const vaultPda = deriveVault(marketPda);
-      const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
-      const userNo = await getAssociatedTokenAddress(noMint, publicKey);
-      const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
-      const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-      ];
-      // Ensure all ATAs exist
-      for (const [ata, mint] of [
-        [userYes, yesMint],
-        [userNo, noMint],
-        [userUsdc, USDC_MINT],
-      ] as [PublicKey, PublicKey][]) {
-        try {
-          await getAccount(conn, ata);
-        } catch {
-          preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
-        }
-      }
-      const tx = await (program.methods as any)
-        .claimWinnings(new BN(1)) // amount ignored by contract, settles everything
-        .accounts({
-          signer: publicKey,
-          market: marketPda,
-          collateralMint: USDC_MINT,
-          yesMint,
-          noMint,
-          vault: vaultPda,
-          userYes,
-          userNo,
-          userCollateral: userUsdc,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions(preIxs)
-        .rpc();
+      // send.claimWinnings ensures YES/NO/USDC ATAs + CU; settles everything on-chain.
+      const tx = await client.send.claimWinnings(new PublicKey(market.publicKey));
       const payout = winningBalance > 0 ? formatUsdc(winningBalance) : "0";
       const burned = losingBalance > 0 ? formatUsdc(losingBalance) : "0";
       toast.success(

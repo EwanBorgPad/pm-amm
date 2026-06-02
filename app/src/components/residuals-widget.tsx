@@ -1,76 +1,29 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builders use `(program.methods as any)` because the
- * generated IDL TS types lag the on-chain struct between `anchor build` runs.
- * Read-only paths use the typed namespace from `@/lib/program`.
- */
-
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { PublicKey } from "@solana/web3.js";
 import { Button } from "@/components/ui/button";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useLpPosition } from "@/hooks/use-lp-position";
 import type { MarketData } from "@/hooks/use-markets";
-import { PublicKey, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
-import {
-  TOKEN_PROGRAM_ID,
-  getAssociatedTokenAddress,
-  createAssociatedTokenAccountInstruction,
-  getAccount,
-} from "@solana/spl-token";
 import { solscanTxUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint, deriveLpPosition } from "@/lib/pda";
 import { toast } from "sonner";
 
 export function ResidualsWidget({ market }: { market: MarketData }) {
   const [loading, setLoading] = useState(false);
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const { data: lp } = useLpPosition(market.publicKey);
 
   if (!lp || lp.shares <= 0) return null;
 
   const handleClaim = async () => {
-    if (!program || !publicKey) return;
+    if (!client || !publicKey) return;
     setLoading(true);
     try {
-      const marketPda = new PublicKey(market.publicKey);
-      const yesMint = deriveYesMint(marketPda);
-      const noMint = deriveNoMint(marketPda);
-      const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
-      const userNo = await getAssociatedTokenAddress(noMint, publicKey);
-      const lpPda = deriveLpPosition(marketPda, publicKey);
-      // Ensure YES+NO ATAs exist (may have been closed after a sell)
-      const conn = program.provider.connection;
-      const preIxs: TransactionInstruction[] = [
-        ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-      ];
-      for (const [ata, mint] of [
-        [userYes, yesMint],
-        [userNo, noMint],
-      ] as [PublicKey, PublicKey][]) {
-        try {
-          await getAccount(conn, ata);
-        } catch {
-          preIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
-        }
-      }
-
-      const tx = await (program.methods as any)
-        .claimLpResiduals()
-        .accounts({
-          signer: publicKey,
-          market: marketPda,
-          yesMint: yesMint,
-          noMint: noMint,
-          lpPosition: lpPda,
-          userYes: userYes,
-          userNo: userNo,
-          tokenProgram: TOKEN_PROGRAM_ID,
-        })
-        .preInstructions(preIxs)
-        .rpc();
+      // The SDK send helper ensures YES/NO ATAs exist + sets the compute budget.
+      const tx = await client.send.claimLpResiduals(new PublicKey(market.publicKey));
       toast.success("Claimed YES+NO residuals", {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });

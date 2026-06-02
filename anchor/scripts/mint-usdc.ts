@@ -22,7 +22,7 @@ import {
   getAccount,
 } from "@solana/spl-token";
 
-const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
+const USDC_MINT = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 
 async function main() {
   const provider = anchor.AnchorProvider.env();

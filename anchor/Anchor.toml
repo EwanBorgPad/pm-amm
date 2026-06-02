@@ -8,10 +8,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-pm_amm = "8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj"
+pm_amm = "B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf"
 
 [programs.localnet]
-pm_amm = "Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK"
+pm_amm = "B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf"
 
 [provider]
 cluster = "localnet"

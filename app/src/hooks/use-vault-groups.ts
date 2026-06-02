@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { getReadOnlyProgram, decodeName } from "@/lib/program";
+import { decodeName } from "@pm-amm/sdk";
+import { getClient } from "@/lib/pm-amm-client";
 
 /** CommitmentVaultGroup binary account size (matches state.rs::CommitmentVaultGroup::LEN). */
 const VAULT_GROUP_ACCOUNT_SIZE = 560;
@@ -54,11 +55,7 @@ export function useVaultGroups() {
   return useQuery<VaultGroupData[]>({
     queryKey: ["vault_groups"],
     queryFn: async () => {
-      const { program } = getReadOnlyProgram(connection);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const accounts = await (program.account as any).commitmentVaultGroup.all([
-        { dataSize: VAULT_GROUP_ACCOUNT_SIZE },
-      ]);
+      const accounts = await getClient(connection).fetchAllVaultGroups(VAULT_GROUP_ACCOUNT_SIZE);
       const now = Math.floor(Date.now() / 1000);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return accounts.map((acc: any) => buildVaultGroupData(acc, now));

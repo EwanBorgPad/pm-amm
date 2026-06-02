@@ -1,25 +1,19 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builders use `(program.methods as any)` because the
- * generated IDL TS types lag the on-chain struct between `anchor build` runs.
- * Read-only paths use the typed namespace from `@/lib/program`.
- */
-
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, ComputeBudgetProgram } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress, getAccount } from "@solana/spl-token";
 import { Figure } from "@/components/ui/figure";
 import { Button } from "@/components/ui/button";
 import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { useLpPosition } from "@/hooks/use-lp-position";
-import { useProgram } from "@/hooks/use-program";
-import { formatUsdc, lpPositionPnl } from "@/lib/pm-math";
-import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint } from "@/lib/pda";
+import { useClient } from "@/lib/pm-amm-client";
+import { formatUsdc, lpPositionPnl } from "@pm-amm/sdk/math";
+import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { PROGRAM_ID, USDC_MINT, solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -46,8 +40,8 @@ function useUsdcBalance() {
 
 function TradePosition({ market }: { market: MarketData }) {
   const marketPda = new PublicKey(market.publicKey);
-  const yesMint = deriveYesMint(marketPda).toBase58();
-  const noMint = deriveNoMint(marketPda).toBase58();
+  const yesMint = deriveYesMint(PROGRAM_ID, marketPda).toBase58();
+  const noMint = deriveNoMint(PROGRAM_ID, marketPda).toBase58();
   const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
 
   const yesAmt = tokens?.yes ?? 0;
@@ -82,8 +76,8 @@ function TradePosition({ market }: { market: MarketData }) {
 function LpPositionRow({ market }: { market: MarketData }) {
   const { data: lp } = useLpPosition(market.publicKey);
   const marketPdaLp = new PublicKey(market.publicKey);
-  const yMint = deriveYesMint(marketPdaLp).toBase58();
-  const nMint = deriveNoMint(marketPdaLp).toBase58();
+  const yMint = deriveYesMint(PROGRAM_ID, marketPdaLp).toBase58();
+  const nMint = deriveNoMint(PROGRAM_ID, marketPdaLp).toBase58();
   const { data: lpTokens } = useUserTokens(yMint, nMint, USDC_MINT.toBase58());
   if (!lp || lp.shares <= 0) return null;
 
@@ -124,7 +118,7 @@ function LpPositionRow({ market }: { market: MarketData }) {
 }
 
 function ResolvableMarket({ market }: { market: MarketData }) {
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const queryClient = useQueryClient();
   const [loading, setLoading] = useState(false);
@@ -136,18 +130,10 @@ function ResolvableMarket({ market }: { market: MarketData }) {
   if (market.resolved || !isExpired || !isAuthority) return null;
 
   const handleResolve = async (side: "yes" | "no") => {
-    if (!program || !publicKey) return;
+    if (!client || !publicKey) return;
     setLoading(true);
     try {
-      const marketPda = new PublicKey(market.publicKey);
-      const tx = await (program.methods as any)
-        .resolveMarket({ [side]: {} })
-        .accounts({
-          signer: publicKey,
-          market: marketPda,
-        })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
-        .rpc();
+      const tx = await client.send.resolveMarket(new PublicKey(market.publicKey), side);
       toast.success(`Resolved: ${side.toUpperCase()} wins`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });

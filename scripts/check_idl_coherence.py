@@ -62,7 +62,9 @@ EXPECTED = {
 
 IDL_PATHS = [
     REPO_ROOT / "idl" / "pm_amm.json",
-    REPO_ROOT / "app" / "src" / "lib" / "pm_amm_idl.json",
+    # Canonical copy bundled by the SDK (the app no longer ships its own IDL —
+    # it consumes @pm-amm/sdk). Kept in sync via `pnpm run sync:idl`.
+    REPO_ROOT / "packages" / "sdk" / "src" / "idl" / "pm_amm.json",
 ]
 
 

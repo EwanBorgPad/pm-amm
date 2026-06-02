@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { StatusBar } from "@/components/layout/status-bar";
 import { Button } from "@/components/ui/button";
-import { useProgram } from "@/hooks/use-program";
-import { runCreateVault } from "@/lib/vault";
-import { runCreateVaultGroup } from "@/lib/vault_group";
+import { useClient } from "@/lib/pm-amm-client";
 import { solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -23,7 +21,7 @@ export default function CreateVaultPage() {
   const [minTotal, setMinTotal] = useState("10");
   const [loading, setLoading] = useState(false);
 
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const router = useRouter();
 
@@ -44,7 +42,7 @@ export default function CreateVaultPage() {
   };
 
   const handleCreate = async () => {
-    if (!program || !publicKey) {
+    if (!client || !publicKey) {
       toast.error("Connect your wallet first");
       return;
     }
@@ -56,7 +54,7 @@ export default function CreateVaultPage() {
     setLoading(true);
     try {
       if (kind === "binary") {
-        const result = await runCreateVault(program, publicKey, {
+        const result = await client.send.createVault({
           name: name.trim(),
           commitDurationSecs: commitSecs,
           marketDurationSecs: marketSecs,
@@ -71,7 +69,7 @@ export default function CreateVaultPage() {
           setLoading(false);
           return;
         }
-        const result = await runCreateVaultGroup(program, publicKey, {
+        const result = await client.send.createVaultGroup({
           name: name.trim(),
           legNames: cleanLegs,
           commitDurationSecs: commitSecs,
@@ -94,7 +92,7 @@ export default function CreateVaultPage() {
       <StatusBar />
       <main className="flex-1 max-w-3xl mx-auto w-full px-[24px] py-[32px]">
         <Link
-          href="/"
+          href="/markets"
           className="text-[12px] text-muted hover:text-text-hi mb-[16px] block font-mono"
         >
           ← BACK

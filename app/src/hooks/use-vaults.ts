@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
-import { getReadOnlyProgram, decodeName } from "@/lib/program";
+import { decodeName } from "@pm-amm/sdk";
+import { getClient } from "@/lib/pm-amm-client";
 
 /** CommitmentVault binary account size (matches state.rs::CommitmentVault::LEN). */
 const VAULT_ACCOUNT_SIZE = 288;
@@ -48,11 +49,7 @@ export function useVaults() {
   return useQuery<VaultData[]>({
     queryKey: ["vaults"],
     queryFn: async () => {
-      const { program } = getReadOnlyProgram(connection);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const accounts = await (program.account as any).commitmentVault.all([
-        { dataSize: VAULT_ACCOUNT_SIZE },
-      ]);
+      const accounts = await getClient(connection).fetchAllVaults(VAULT_ACCOUNT_SIZE);
       const now = Math.floor(Date.now() / 1000);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return accounts.map((acc: any) => buildVaultData(acc, now));
