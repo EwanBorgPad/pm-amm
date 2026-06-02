@@ -1,6 +1,9 @@
 /**
- * Client-side pm-AMM math (float64, for display only).
+ * Client-side pm-AMM math (float64, for display / off-chain estimation only).
  * Port of oracle/pm_amm_math.py — NOT for on-chain use.
+ *
+ * Pure module: zero Solana / chain dependencies. Also exposed at the
+ * `@pm-amm/sdk/math` subpath so non-Solana consumers can pull it in standalone.
  */
 
 /**

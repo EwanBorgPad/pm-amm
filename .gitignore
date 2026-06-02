@@ -25,3 +25,8 @@ Thumbs.db
 coverage/
 .nyc_output/
 oracle/.venv
+
+# Workspace / build output / agent state
+.claude/
+packages/*/dist
+packages/*/*.tgz

@@ -345,6 +345,301 @@ impl GroupMarket {
 }
 
 // ============================================================================
+// CommitmentVault — permissionless bootstrap for prediction markets
+// (Sprint 22). PDA seeds: [b"vault", vault_id.to_le_bytes()]
+//
+// Solves the cold-start problem: rather than expecting a designated LP to
+// front the initial liquidity at an arbitrary price, the vault aggregates
+// crowd commits in USDC on YES/NO, then computes the initial market price
+// from the commit ratio, calibrates L_0 via suggest_l_zero_at_price, and
+// finally launches a regular pm-AMM market with the crowd's USDC as
+// initial liquidity. Each committer becomes an LP pro-rata to their commit.
+// ============================================================================
+
+pub const MIN_COMMIT_USDC: u64 = 1_000_000; // 1 USDC (6 decimals)
+
+/// Min/max bounds for the vault's commit and market durations. Enforced at
+/// `initialize_vault` so misconfigured vaults can't be created.
+pub const MIN_COMMIT_DURATION_SECS: i64 = 60; // 1 minute
+pub const MAX_COMMIT_DURATION_SECS: i64 = 60 * 60 * 24 * 7; // 7 days
+pub const MIN_MARKET_DURATION_SECS: i64 = 300; // matches initialize_market::MIN_DURATION_SECS
+pub const MAX_MARKET_DURATION_SECS: i64 = 60 * 60 * 24 * 30; // 30 days
+
+#[account]
+pub struct CommitmentVault {
+    pub authority: Pubkey,
+    pub vault_id: u64,
+    pub collateral_mint: Pubkey,
+
+    /// UTF-8 zero-padded vault name (becomes the launched market's name).
+    pub name: [u8; 64],
+
+    /// When the commit phase ends. After this, no more commits, launch
+    /// becomes available, refund becomes available.
+    pub commit_end_ts: i64,
+
+    /// Duration of the launched market (added to launch time to get end_ts).
+    pub market_end_ts: i64,
+
+    pub yes_total: u64,
+    pub no_total: u64,
+    pub commit_count: u32,
+
+    /// Below this threshold, launch is refused → committers must refund.
+    pub min_total: u64,
+
+    pub launched: bool,
+    /// Set at launch to the initial_price_bps computed from the commit ratio.
+    /// Kept for transparency post-launch.
+    pub winning_price_bps: u16,
+
+    /// The launched Market PDA. `Pubkey::default()` pre-launch.
+    pub market: Pubkey,
+
+    /// The LpPosition PDA owned by the vault (seeds [b"lp", market, vault]).
+    /// Holds the LP shares minted at launch; claim_committer distributes them
+    /// pro-rata. `Pubkey::default()` pre-launch.
+    pub lp_position: Pubkey,
+
+    pub bump: u8,
+    pub _reserved: [u8; 32],
+}
+
+impl CommitmentVault {
+    pub const SEED: &'static [u8] = b"vault";
+
+    pub const LEN: usize = 8 // discriminator
+        + 32 // authority
+        + 8  // vault_id
+        + 32 // collateral_mint
+        + 64 // name
+        + 8  // commit_end_ts
+        + 8  // market_end_ts
+        + 8  // yes_total
+        + 8  // no_total
+        + 4  // commit_count
+        + 8  // min_total
+        + 1  // launched
+        + 2  // winning_price_bps
+        + 32 // market
+        + 32 // lp_position
+        + 1  // bump
+        + 32; // reserved
+
+    /// Total = yes_total + no_total. Used as the AMM bootstrap budget.
+    pub fn total(&self) -> u64 {
+        self.yes_total.saturating_add(self.no_total)
+    }
+
+    /// Compute the launch price in basis points from the commit ratio.
+    /// Clamped to [100, 9900] (the valid `initial_price_bps` range), so an
+    /// all-YES or all-NO crowd still produces a valid market.
+    pub fn compute_price_bps(&self) -> u16 {
+        let total = self.total();
+        if total == 0 {
+            return 5000; // fallback; caller should reject via min_total
+        }
+        // (yes_total * 10_000 / total) — checked, fits in u64 trivially.
+        let raw = (self.yes_total as u128)
+            .saturating_mul(10_000)
+            .checked_div(total as u128)
+            .unwrap_or(5000) as u64;
+        let clamped = raw.clamp(100, 9900);
+        clamped as u16
+    }
+
+    pub fn name_str(&self) -> &str {
+        let len = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
+        core::str::from_utf8(&self.name[..len]).unwrap_or("")
+    }
+}
+
+#[account]
+pub struct CommitPosition {
+    pub vault: Pubkey,
+    pub owner: Pubkey,
+    pub yes_amount: u64,
+    pub no_amount: u64,
+    pub claimed: bool,
+    pub bump: u8,
+    pub _reserved: [u8; 16],
+}
+
+impl CommitPosition {
+    pub const SEED: &'static [u8] = b"commit";
+    pub const LEN: usize = 8 + 32 + 32 + 8 + 8 + 1 + 1 + 16;
+
+    pub fn total(&self) -> u64 {
+        self.yes_amount.saturating_add(self.no_amount)
+    }
+}
+
+// ============================================================================
+// CommitmentVaultGroup — multi-outcome commitment vault (Sprint 23)
+// PDA seeds: [b"vault_group", vault_id.to_le_bytes()]
+//
+// Same idea as CommitmentVault but for N outcomes. The crowd commits on each
+// leg (0..N), then `launch_vault_group_market` creates the GroupMarket and
+// `launch_vault_group_leg` (called once per leg) seeds each underlying binary
+// market at `leg_totals[i] / total` bps. Σ p_i = 1 by construction
+// (Σ leg_totals = total). Any leg below 100 bps (minimum allowed by
+// initialize_market::initial_price_bps) jails the entire launch — committers
+// must refund. This keeps the per-leg pm-AMM math valid.
+// ============================================================================
+
+/// Maximum legs per multi-outcome vault. 8 is enough for sports brackets +
+/// most categorical events. Smaller than GroupMarket::MAX_LEGS (32) to keep
+/// the launch fan-out manageable (1 init group tx + up to 8 leg launch txs).
+pub const MAX_VAULT_LEGS: usize = 8;
+
+/// Width of each leg name in the on-chain account (UTF-8, zero-padded).
+pub const LEG_NAME_LEN: usize = 32;
+
+#[account]
+pub struct CommitmentVaultGroup {
+    pub authority: Pubkey,
+    pub vault_id: u64,
+    pub collateral_mint: Pubkey,
+
+    /// UTF-8 zero-padded vault name (becomes the launched GroupMarket name).
+    pub name: [u8; 64],
+
+    /// 2..=MAX_VAULT_LEGS.
+    pub leg_count: u8,
+
+    /// Per-leg human-readable label (e.g. "Trump", "Biden", "Other"). Used to
+    /// derive the launched market names. UTF-8, zero-padded, max 32 bytes.
+    pub leg_names: [[u8; LEG_NAME_LEN]; MAX_VAULT_LEGS],
+
+    /// Per-leg committed USDC totals (raw u64, 6 decimals).
+    pub leg_totals: [u64; MAX_VAULT_LEGS],
+
+    pub commit_end_ts: i64,
+    pub market_end_ts: i64,
+
+    pub commit_count: u32,
+    pub min_total: u64,
+
+    /// True iff the wrapping GroupMarket account has been created.
+    pub group_market_initialized: bool,
+    /// Number of legs whose underlying Market has been launched + attached.
+    /// Once `legs_launched == leg_count` the vault is fully launched and
+    /// `claim_committer_group` / `refund_commit_group` is gated accordingly.
+    pub legs_launched: u8,
+
+    /// GroupMarket PDA. `Pubkey::default()` until launch_vault_group_market.
+    pub group_market: Pubkey,
+
+    pub bump: u8,
+    pub _reserved: [u8; 32],
+}
+
+impl CommitmentVaultGroup {
+    pub const SEED: &'static [u8] = b"vault_group";
+
+    pub const LEN: usize = 8 // discriminator
+        + 32 // authority
+        + 8  // vault_id
+        + 32 // collateral_mint
+        + 64 // name
+        + 1  // leg_count
+        + LEG_NAME_LEN * MAX_VAULT_LEGS // leg_names = 256
+        + 8 * MAX_VAULT_LEGS // leg_totals = 64
+        + 8  // commit_end_ts
+        + 8  // market_end_ts
+        + 4  // commit_count
+        + 8  // min_total
+        + 1  // group_market_initialized
+        + 1  // legs_launched
+        + 32 // group_market
+        + 1  // bump
+        + 32; // reserved
+
+    /// Σ leg_totals — saturating to u64::MAX (cannot overflow in practice
+    /// since MAX_VAULT_LEGS * u64::MAX would, but each leg is bounded by
+    /// real-world USDC supply).
+    pub fn total(&self) -> u64 {
+        let mut sum: u64 = 0;
+        for i in 0..self.leg_count as usize {
+            sum = sum.saturating_add(self.leg_totals[i]);
+        }
+        sum
+    }
+
+    /// Leg `i`'s share of total commits in basis points (0..=10_000). Returns
+    /// 0 if `total == 0` (caller should already have rejected via min_total).
+    pub fn leg_share_bps(&self, i: usize) -> u16 {
+        let total = self.total();
+        if total == 0 || i >= self.leg_count as usize {
+            return 0;
+        }
+        ((self.leg_totals[i] as u128).saturating_mul(10_000) / total as u128) as u16
+    }
+
+    /// True iff every leg's share is ≥ 100 bps (the minimum
+    /// `initial_price_bps` accepted by initialize_market). If any leg is
+    /// under-committed, the launch path is jailed and committers must refund.
+    pub fn all_legs_above_min_share(&self) -> bool {
+        for i in 0..self.leg_count as usize {
+            if self.leg_share_bps(i) < 100 {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub fn name_str(&self) -> &str {
+        Self::trim_str(&self.name)
+    }
+
+    pub fn leg_name_str(&self, i: usize) -> &str {
+        if i >= MAX_VAULT_LEGS {
+            return "";
+        }
+        Self::trim_str(&self.leg_names[i])
+    }
+
+    fn trim_str(buf: &[u8]) -> &str {
+        let len = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        core::str::from_utf8(&buf[..len]).unwrap_or("")
+    }
+}
+
+#[account]
+pub struct CommitPositionGroup {
+    pub vault: Pubkey,
+    pub owner: Pubkey,
+    pub leg_amounts: [u64; MAX_VAULT_LEGS],
+    pub claimed: bool,
+    pub bump: u8,
+    pub _reserved: [u8; 16],
+}
+
+impl CommitPositionGroup {
+    pub const SEED: &'static [u8] = b"commit_group";
+
+    pub const LEN: usize = 8 // discriminator
+        + 32 // vault
+        + 32 // owner
+        + 8 * MAX_VAULT_LEGS // leg_amounts = 64
+        + 1  // claimed
+        + 1  // bump
+        + 16; // reserved
+
+    pub fn total(&self) -> u64 {
+        let mut sum: u64 = 0;
+        for a in self.leg_amounts.iter() {
+            sum = sum.saturating_add(*a);
+        }
+        sum
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -585,6 +880,205 @@ mod tests {
         assert_eq!(make_empty_group(14).expected_leg_initial_price_bps(), 714);
         assert_eq!(make_empty_group(3).expected_leg_initial_price_bps(), 3333);
         assert_eq!(make_empty_group(0).expected_leg_initial_price_bps(), 0);
+    }
+
+    // ========================================================================
+    // CommitmentVault tests (Sprint 22)
+    // ========================================================================
+
+    fn make_vault(yes: u64, no: u64) -> CommitmentVault {
+        CommitmentVault {
+            authority: Pubkey::default(),
+            vault_id: 0,
+            collateral_mint: Pubkey::default(),
+            name: [0u8; 64],
+            commit_end_ts: 0,
+            market_end_ts: 0,
+            yes_total: yes,
+            no_total: no,
+            commit_count: 0,
+            min_total: 0,
+            launched: false,
+            winning_price_bps: 0,
+            market: Pubkey::default(),
+            lp_position: Pubkey::default(),
+            bump: 0,
+            _reserved: [0u8; 32],
+        }
+    }
+
+    #[test]
+    fn test_vault_compute_price_bps() {
+        // Balanced: yes=no → 50%
+        assert_eq!(make_vault(50, 50).compute_price_bps(), 5000);
+        // All YES → clamped to 9900
+        assert_eq!(make_vault(100, 0).compute_price_bps(), 9900);
+        // All NO → clamped to 100
+        assert_eq!(make_vault(0, 100).compute_price_bps(), 100);
+        // 30/70
+        assert_eq!(make_vault(30, 70).compute_price_bps(), 3000);
+        // Tiny YES, large NO → near 100
+        let v = make_vault(1, 1_000_000);
+        let p = v.compute_price_bps();
+        assert_eq!(p, 100, "clamped at lower bound, got {p}");
+    }
+
+    #[test]
+    fn test_vault_compute_price_handles_total_zero() {
+        // No commits at all → fallback 5000 (caller should reject anyway via min_total)
+        assert_eq!(make_vault(0, 0).compute_price_bps(), 5000);
+    }
+
+    #[test]
+    fn test_vault_total_saturating() {
+        let v = make_vault(u64::MAX - 5, 10);
+        // Saturating add prevents overflow panic; behaviour is u64::MAX.
+        assert_eq!(v.total(), u64::MAX);
+    }
+
+    #[test]
+    fn test_vault_name_str() {
+        let mut v = make_vault(0, 0);
+        let s = "Will BTC hit $200k by EoY?";
+        let src = s.as_bytes();
+        v.name[..src.len()].copy_from_slice(src);
+        assert_eq!(v.name_str(), s);
+    }
+
+    #[test]
+    fn test_commit_position_total() {
+        let p = CommitPosition {
+            vault: Pubkey::default(),
+            owner: Pubkey::default(),
+            yes_amount: 5,
+            no_amount: 3,
+            claimed: false,
+            bump: 0,
+            _reserved: [0u8; 16],
+        };
+        assert_eq!(p.total(), 8);
+    }
+
+    #[test]
+    fn test_vault_len_under_solana_init_limit() {
+        const SOLANA_INIT_LIMIT: usize = 10_240;
+        const _: () = assert!(CommitmentVault::LEN < SOLANA_INIT_LIMIT);
+        const _: () = assert!(CommitPosition::LEN < SOLANA_INIT_LIMIT);
+    }
+
+    // ========================================================================
+    // CommitmentVaultGroup tests (Sprint 23)
+    // ========================================================================
+
+    fn make_vault_group(leg_count: u8, totals: &[u64]) -> CommitmentVaultGroup {
+        let mut v = CommitmentVaultGroup {
+            authority: Pubkey::default(),
+            vault_id: 0,
+            collateral_mint: Pubkey::default(),
+            name: [0u8; 64],
+            leg_count,
+            leg_names: [[0u8; LEG_NAME_LEN]; MAX_VAULT_LEGS],
+            leg_totals: [0u64; MAX_VAULT_LEGS],
+            commit_end_ts: 0,
+            market_end_ts: 0,
+            commit_count: 0,
+            min_total: 0,
+            group_market_initialized: false,
+            legs_launched: 0,
+            group_market: Pubkey::default(),
+            bump: 0,
+            _reserved: [0u8; 32],
+        };
+        for (i, t) in totals.iter().enumerate() {
+            v.leg_totals[i] = *t;
+        }
+        v
+    }
+
+    #[test]
+    fn test_vault_group_total() {
+        let v = make_vault_group(3, &[100, 200, 700]);
+        assert_eq!(v.total(), 1000);
+        // Beyond leg_count is ignored
+        let mut v2 = v.clone_for_test();
+        v2.leg_totals[5] = 9_999;
+        assert_eq!(v2.total(), 1000);
+    }
+
+    #[test]
+    fn test_vault_group_leg_share_bps() {
+        let v = make_vault_group(3, &[100, 200, 700]);
+        assert_eq!(v.leg_share_bps(0), 1000); // 10%
+        assert_eq!(v.leg_share_bps(1), 2000); // 20%
+        assert_eq!(v.leg_share_bps(2), 7000); // 70%
+        assert_eq!(v.leg_share_bps(3), 0); // out of bounds
+    }
+
+    #[test]
+    fn test_vault_group_all_legs_above_min_share() {
+        // Healthy: every leg ≥ 1%
+        assert!(make_vault_group(3, &[100, 200, 700]).all_legs_above_min_share());
+        // One tiny leg → fails (1 in 10_000 = 1 bps < 100)
+        assert!(!make_vault_group(3, &[1, 4999, 5000]).all_legs_above_min_share());
+        // Empty totals (would div-by-zero) → fails
+        assert!(!make_vault_group(3, &[0, 0, 0]).all_legs_above_min_share());
+        // Exactly 100 bps → ok
+        assert!(make_vault_group(3, &[100, 4900, 5000]).all_legs_above_min_share());
+        // 8-leg uniform → 1250 bps each
+        assert!(make_vault_group(8, &[1; 8]).all_legs_above_min_share());
+    }
+
+    #[test]
+    fn test_vault_group_leg_name() {
+        let mut v = make_vault_group(3, &[1, 1, 1]);
+        let src = b"Trump";
+        v.leg_names[0][..src.len()].copy_from_slice(src);
+        assert_eq!(v.leg_name_str(0), "Trump");
+        assert_eq!(v.leg_name_str(1), "");
+        assert_eq!(v.leg_name_str(99), "");
+    }
+
+    #[test]
+    fn test_commit_position_group_total() {
+        let p = CommitPositionGroup {
+            vault: Pubkey::default(),
+            owner: Pubkey::default(),
+            leg_amounts: [1, 2, 3, 4, 5, 0, 0, 0],
+            claimed: false,
+            bump: 0,
+            _reserved: [0u8; 16],
+        };
+        assert_eq!(p.total(), 15);
+    }
+
+    #[test]
+    fn test_vault_group_lens_under_init_limit() {
+        const SOLANA_INIT_LIMIT: usize = 10_240;
+        const _: () = assert!(CommitmentVaultGroup::LEN < SOLANA_INIT_LIMIT);
+        const _: () = assert!(CommitPositionGroup::LEN < SOLANA_INIT_LIMIT);
+    }
+
+    impl CommitmentVaultGroup {
+        fn clone_for_test(&self) -> Self {
+            CommitmentVaultGroup {
+                authority: self.authority,
+                vault_id: self.vault_id,
+                collateral_mint: self.collateral_mint,
+                name: self.name,
+                leg_count: self.leg_count,
+                leg_names: self.leg_names,
+                leg_totals: self.leg_totals,
+                commit_end_ts: self.commit_end_ts,
+                market_end_ts: self.market_end_ts,
+                commit_count: self.commit_count,
+                min_total: self.min_total,
+                group_market_initialized: self.group_market_initialized,
+                legs_launched: self.legs_launched,
+                group_market: self.group_market,
+                bump: self.bump,
+                _reserved: self._reserved,
+            }
+        }
     }
 
     #[test]

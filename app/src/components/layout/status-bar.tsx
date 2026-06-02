@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Wordmark } from "@/components/ui/wordmark";
 import { useMarkets } from "@/hooks/use-markets";
-import { formatUsdc, poolValue } from "@/lib/pm-math";
+import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
 import { CLUSTER } from "@/lib/constants";
 import { toast } from "sonner";
 
@@ -72,7 +72,19 @@ export function StatusBar() {
         "sticky top-0 z-10",
       ].join(" ")}
     >
-      <Wordmark size={16} tone="light" />
+      <div className="flex items-center gap-[20px]">
+        <Link href="/" className="shrink-0">
+          <Wordmark size={16} tone="light" />
+        </Link>
+        <nav className="hidden md:flex items-center gap-[16px]">
+          <Link href="/markets" className="hover:text-text-hi transition-all duration-[120ms]">
+            Markets
+          </Link>
+          <Link href="/docs" className="hover:text-text-hi transition-all duration-[120ms]">
+            Docs
+          </Link>
+        </nav>
+      </div>
 
       <div className="hidden md:flex gap-[24px] justify-center">
         <Stat label="NET" value={CLUSTER.toUpperCase()} />
@@ -83,7 +95,7 @@ export function StatusBar() {
 
       <div className="flex items-center gap-[16px]">
         <a
-          href="https://github.com/Mattdgn/pm-amm"
+          href="https://github.com/EwanBorgPad/pm-amm"
           target="_blank"
           rel="noopener noreferrer"
           className="hidden sm:flex items-center gap-[6px] text-muted hover:text-text-hi transition-all duration-[120ms] group"
@@ -93,6 +105,12 @@ export function StatusBar() {
           </svg>
           <span className="text-[10px] tracking-[0.05em]">Star us</span>
         </a>
+        <Link
+          href="/create-vault"
+          className="hidden sm:inline text-muted hover:text-text-hi transition-all duration-[120ms]"
+        >
+          OPEN VAULT
+        </Link>
         {publicKey && (
           <>
             <button

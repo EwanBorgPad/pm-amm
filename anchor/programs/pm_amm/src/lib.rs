@@ -33,7 +33,7 @@ use anchor_lang::prelude::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK");
+declare_id!("GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y");
 
 #[program]
 pub mod pm_amm {
@@ -160,5 +160,119 @@ pub mod pm_amm {
     /// via `resolve_group_leg`. Authority-only.
     pub fn cancel_group_market(ctx: Context<CancelGroupMarket>) -> Result<()> {
         instructions::group::cancel_group_market::handler(ctx)
+    }
+
+    // ========================================================================
+    // Commitment Vault (Sprint 22 — permissionless bootstrap)
+    // ========================================================================
+
+    /// Open a new Commitment Vault. Anyone can call. Aggregates crowd commits
+    /// before the market exists; the launch price is computed from the
+    /// commit ratio.
+    pub fn initialize_vault(
+        ctx: Context<InitializeVault>,
+        vault_id: u64,
+        name: String,
+        commit_duration_secs: i64,
+        market_duration_secs: i64,
+        min_total: u64,
+    ) -> Result<()> {
+        instructions::vault::initialize_vault::handler(
+            ctx,
+            vault_id,
+            name,
+            commit_duration_secs,
+            market_duration_secs,
+            min_total,
+        )
+    }
+
+    /// Commit USDC on YES or NO. Anyone, any number of times, until
+    /// commit_end_ts. Min commit: 1 USDC.
+    pub fn vault_commit(ctx: Context<Commit>, side: Side, amount: u64) -> Result<()> {
+        instructions::vault::commit::handler(ctx, side, amount)
+    }
+
+    /// Launch the underlying pm-AMM market once commit_end_ts has passed and
+    /// total ≥ min_total. Permissionless. The caller pays the rent of the
+    /// new Market + mints + vault + Metaplex metadata accounts.
+    pub fn launch_vault_market(ctx: Context<LaunchVaultMarket>, market_id: u64) -> Result<()> {
+        instructions::vault::launch_vault_market::handler(ctx, market_id)
+    }
+
+    /// Committer claims back their USDC after launch. (v1: returns the commit
+    /// 1:1; v2 will distribute LP shares of the launched market pro-rata.)
+    pub fn claim_committer(ctx: Context<ClaimCommitter>) -> Result<()> {
+        instructions::vault::claim_committer::handler(ctx)
+    }
+
+    /// Refund a committer 1:1 if the vault never launched.
+    pub fn refund_commit(ctx: Context<RefundCommit>) -> Result<()> {
+        instructions::vault::refund_commit::handler(ctx)
+    }
+
+    // ========================================================================
+    // Multi-outcome Commitment Vault (Sprint 23)
+    // ========================================================================
+
+    /// Open a multi-outcome Commitment Vault. Authority picks the leg names
+    /// (2..=8). Crowd then commits per-leg with `vault_commit_group`.
+    pub fn initialize_vault_group(
+        ctx: Context<InitializeVaultGroup>,
+        vault_id: u64,
+        name: String,
+        leg_names: Vec<String>,
+        commit_duration_secs: i64,
+        market_duration_secs: i64,
+        min_total: u64,
+    ) -> Result<()> {
+        instructions::vault::initialize_vault_group::handler(
+            ctx,
+            vault_id,
+            name,
+            leg_names,
+            commit_duration_secs,
+            market_duration_secs,
+            min_total,
+        )
+    }
+
+    /// Commit USDC on a specific leg of a multi-outcome vault. Same rules as
+    /// `vault_commit`: anyone, any number of times, until commit_end_ts.
+    pub fn vault_commit_group(ctx: Context<CommitGroup>, leg_index: u8, amount: u64) -> Result<()> {
+        instructions::vault::vault_commit_group::handler(ctx, leg_index, amount)
+    }
+
+    /// Step 1 of launch: create the wrapping GroupMarket. Permissionless.
+    /// Refuses if any leg has < 100 bps share (the underlying pm-AMM floor).
+    pub fn launch_vault_group_market(
+        ctx: Context<LaunchVaultGroupMarket>,
+        group_id: u64,
+    ) -> Result<()> {
+        instructions::vault::launch_vault_group_market::handler(ctx, group_id)
+    }
+
+    /// Step 2 of launch (run once per leg): create the leg's binary Market +
+    /// mints + vault + Metaplex metadata, then attach it to the GroupMarket.
+    /// Each leg market is seeded at `leg_totals[i] / total` bps.
+    pub fn launch_vault_group_leg(
+        ctx: Context<LaunchVaultGroupLeg>,
+        leg_index: u8,
+        market_id: u64,
+    ) -> Result<()> {
+        instructions::vault::launch_vault_group_leg::handler(ctx, leg_index, market_id)
+    }
+
+    /// Per-leg claim for multi-outcome vault committers (v2): mints leg
+    /// YES tokens 1:1 with their commit on that leg, and transfers the
+    /// backing USDC from the commitment vault to the leg's market vault.
+    /// Call once per leg the committer has stake in.
+    pub fn claim_committer_group(ctx: Context<ClaimCommitterGroup>, leg_index: u8) -> Result<()> {
+        instructions::vault::claim_committer_group::handler(ctx, leg_index)
+    }
+
+    /// Refund a committer 1:1 if the multi-outcome vault never launched.
+    pub fn refund_commit_group(ctx: Context<RefundCommitGroup>) -> Result<()> {
+        instructions::vault::refund_commit_group::handler(ctx)
     }
 }

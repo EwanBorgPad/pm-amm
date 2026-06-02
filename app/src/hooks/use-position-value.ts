@@ -1,12 +1,5 @@
 "use client";
 
-/* eslint-disable @typescript-eslint/no-explicit-any --
- * Write-path Anchor CPI builder for simulating swaps. Uses
- * `(program.methods as any)` because the generated IDL TS types lag the
- * on-chain struct between `anchor build` runs. Read-only fetchers use the
- * typed namespace from `@/lib/program`.
- */
-
 import { useQuery } from "@tanstack/react-query";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
@@ -16,11 +9,10 @@ import {
   type TransactionInstruction,
   type Connection,
 } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import { BN } from "@anchor-lang/core";
+import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint, deriveVault } from "@/lib/pda";
-import { getReadOnlyProgram } from "@/lib/program";
+import { getClient } from "@/lib/pm-amm-client";
+import type { PmAmmClient, SwapDirection } from "@pm-amm/sdk";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 
 export interface PositionValue {
@@ -46,14 +38,10 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
 
       try {
         const market = new PublicKey(marketPda);
-        // Use the helper so the IDL address matches the env-driven PROGRAM_ID
-        // (the JSON ships with localnet; without the helper override the
-        // simulated tx targets the wrong program on devnet).
-        const { program } = getReadOnlyProgram(connection);
+        const client = getClient(connection);
 
-        const yesMint = deriveYesMint(market);
-        const noMint = deriveNoMint(market);
-        const vault = deriveVault(market);
+        const yesMint = client.yesMint(market);
+        const noMint = client.noMint(market);
 
         const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
         const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
@@ -80,18 +68,12 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
         // Simulate selling YES tokens
         if (yesAmount > 0) {
           yesValueUsdc = await simulateSell(
-            program,
+            client,
             connection,
             publicKey,
-            { yesToUsdc: {} },
+            "yesToUsdc",
             yesAmount,
             market,
-            yesMint,
-            noMint,
-            vault,
-            userUsdc,
-            userYes,
-            userNo,
             ataIxs,
             userUsdc,
           );
@@ -100,18 +82,12 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
         // Simulate selling NO tokens
         if (noAmount > 0) {
           noValueUsdc = await simulateSell(
-            program,
+            client,
             connection,
             publicKey,
-            { noToUsdc: {} },
+            "noToUsdc",
             noAmount,
             market,
-            yesMint,
-            noMint,
-            vault,
-            userUsdc,
-            userYes,
-            userNo,
             ataIxs,
             userUsdc,
           );
@@ -140,18 +116,12 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
 }
 
 async function simulateSell(
-  program: any,
+  client: PmAmmClient,
   connection: Connection,
   publicKey: PublicKey,
-  direction: Record<string, Record<string, never>>,
+  direction: SwapDirection,
   amount: number,
   market: PublicKey,
-  yesMint: PublicKey,
-  noMint: PublicKey,
-  vault: PublicKey,
-  userUsdc: PublicKey,
-  userYes: PublicKey,
-  userNo: PublicKey,
   ataIxs: TransactionInstruction[],
   outputAta: PublicKey,
 ): Promise<number> {
@@ -167,21 +137,13 @@ async function simulateSell(
     /* ATA doesn't exist */
   }
 
-  const ix = await (program.methods as any)
-    .swap(direction, new BN(amount), new BN(0))
-    .accounts({
-      signer: publicKey,
-      market,
-      collateralMint: USDC_MINT,
-      yesMint: yesMint,
-      noMint: noMint,
-      vault,
-      userCollateral: userUsdc,
-      userYes: userYes,
-      userNo: userNo,
-      tokenProgram: TOKEN_PROGRAM_ID,
-    })
-    .instruction();
+  const ix = await client.ix.swap({
+    signer: publicKey,
+    market,
+    direction,
+    amountIn: amount,
+    minOutput: 0,
+  });
 
   const tx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
@@ -196,7 +158,7 @@ async function simulateSell(
   if (sim.value.err) return 0;
 
   // Read post-balance from simulated accounts
-  const postAccounts = (sim.value as any).accounts;
+  const postAccounts = sim.value.accounts;
   if (postAccounts?.[0]?.data) {
     const buf = Uint8Array.from(atob(postAccounts[0].data[0]), (c) => c.charCodeAt(0));
     const view = new DataView(buf.buffer);

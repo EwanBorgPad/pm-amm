@@ -2,14 +2,14 @@
 
 [![CI](https://github.com/mattdgn/pm-amm/actions/workflows/test.yml/badge.svg)](https://github.com/mattdgn/pm-amm/actions/workflows/test.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Solana](https://img.shields.io/badge/Solana-Devnet-9945FF)](https://explorer.solana.com/address/8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj?cluster=devnet)
+[![Solana](https://img.shields.io/badge/Solana-Devnet-9945FF)](https://explorer.solana.com/address/GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y?cluster=devnet)
 [![Anchor](https://img.shields.io/badge/Anchor-1.0-blueviolet)](https://www.anchor-lang.com/)
 
 **First production implementation of the Paradigm pm-AMM on Solana. 100% fidelity to the paper. Uniform LVR in price and time.**
 
 > Based on [*pm-AMM: A Prediction Market AMM*](https://www.paradigm.xyz/2024/11/pm-amm) by Ciamac Moallemi & Dan Robinson (Paradigm, Nov 2024).
 
-**Program ID**: `8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj` ([Devnet Explorer](https://explorer.solana.com/address/8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj?cluster=devnet))
+**Program ID**: `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` ([Devnet Explorer](https://explorer.solana.com/address/GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y?cluster=devnet))
 
 ---
 
@@ -72,7 +72,7 @@ pm-amm/
       state.rs           # Market, LpPosition structs
       errors.rs          # Error codes
       instructions/      # 11 instructions (fully-backed architecture, Sprint 20)
-    tests/               # 46 TS integration tests (pm_amm + group_market + access_control)
+    tests/               # 64 TS integration tests (pm_amm + group_market + access_control + vault + vault_group)
     scripts/             # Deploy + seed scripts
   app/                   # Next.js frontend (with /create-group and /group/[id] pages)
   oracle/                # Python truth oracle (scipy reference)
@@ -152,24 +152,26 @@ The Anchor IDL is available at [`idl/pm_amm.json`](idl/pm_amm.json) for integrat
 
 ## Test Suite
 
-**242 tests total:**
+**266 tests total:**
 
 | Category | Count | Coverage |
 |---|---|---|
-| Rust unit tests (`pm_math`, `accrual`, `state`, group) | 60 | All math functions, Q64.64 roundtrips, accrual properties, solver precision, group invariants, `min_sum` formula proof |
+| Rust unit tests (`pm_math`, `accrual`, `state`, group, vault, vault_group) | 72 | All math functions, Q64.64 roundtrips, accrual properties, solver precision, group invariants, `min_sum` formula proof, vault + multi-outcome vault state |
 | TS integration — `pm_amm.ts` | 18 | Full lifecycle binary: init → deposit → swap → claim → resolve |
 | TS integration — `group_market.ts` | 22 | 5 group instructions: happy paths + every reachable error code on localnet, including `total_seeded_bps` overflow and underseed |
 | TS integration — `access_control.ts` | 6 | Permissionless paths (accrue, redeem) + signer-bound LpPosition checks |
-| Python property tests | 24 | Paradigm properties A/B/C, robustness D/E/F, initial-price G |
+| TS integration — `vault.ts` (Sprint 22 binary commitment vault) | 9 | 5 vault instructions: init/commit/launch/claim/refund + edge cases (too-small commit, premature launch, refund path) |
+| TS integration — `vault_group.ts` (Sprint 23 multi-outcome commitment vault) | 9 | 6 vault group instructions: init/commit/launch_market/launch_leg/claim/refund + edge cases (leg-index OOB, leg-count bounds, too-small commit, premature launch / refund) |
+| Python property tests | 18 | Paradigm properties A/B/C, robustness D/E/F, initial-price G |
 | Python oracle tests | 112 | Cross-validation against scipy |
 
 Run with:
 
 ```bash
-pnpm run test:rust   # Rust unit (60)
-pnpm run test        # TS integration on localnet (46 — boots surfpool with Metaplex cloned from devnet)
+pnpm run test:rust   # Rust unit (72)
+pnpm run test        # TS integration on localnet (64 — boots surfpool with Metaplex cloned from devnet)
 pnpm run test:all    # Rust + Python (skips TS)
-python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (136)
+python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (130)
 ```
 
 ---
@@ -213,13 +215,13 @@ pnpm install
 # Build the program (anchor build + idl build)
 pnpm run build
 
-# Run Rust unit tests (62 tests)
+# Run Rust unit tests (72 tests)
 pnpm run test:rust
 
-# Run integration tests (18 tests, requires local validator)
+# Run integration tests (64 tests, requires local validator)
 pnpm run test
 
-# Run Python oracle + property tests (136 tests)
+# Run Python oracle + property tests (130 tests)
 cd oracle && python3 test_oracle.py && python3 test_properties.py
 
 # Run everything except TS integration

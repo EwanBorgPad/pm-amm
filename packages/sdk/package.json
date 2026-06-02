@@ -1,0 +1,59 @@
+{
+  "name": "@pm-amm/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the pm-AMM Solana program — prediction markets, commitment vaults, and multi-outcome groups (Paradigm dynamic pm-AMM).",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./math": {
+      "types": "./dist/math.d.ts",
+      "import": "./dist/math.js",
+      "require": "./dist/math.cjs"
+    },
+    "./idl/pm_amm.json": "./src/idl/pm_amm.json"
+  },
+  "files": [
+    "dist",
+    "src/idl/pm_amm.json",
+    "llms.txt",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "smoke": "node test/smoke.cjs",
+    "prepare": "tsup",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "solana",
+    "anchor",
+    "pm-amm",
+    "prediction-markets",
+    "amm",
+    "paradigm"
+  ],
+  "peerDependencies": {
+    "@anchor-lang/core": "^1.0.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4"
+  },
+  "devDependencies": {
+    "@anchor-lang/core": "^1.0.1",
+    "@solana/spl-token": "^0.4.14",
+    "@solana/web3.js": "^1.98.4",
+    "@types/node": "^20",
+    "tsup": "^8.5.0",
+    "typescript": "^5"
+  }
+}

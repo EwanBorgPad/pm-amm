@@ -137,7 +137,12 @@ describe("access_control", () => {
       })
       .rpc();
 
-    const userUsdc = await createTokenAccount(provider.connection, payer, collateralMint, authority);
+    const userUsdc = await createTokenAccount(
+      provider.connection,
+      payer,
+      collateralMint,
+      authority,
+    );
     await mintTo(provider.connection, payer, collateralMint, userUsdc, payer, 2_000_000_000);
 
     const lpPda = deriveLpPda(pdas.marketPda, authority, program.programId);
@@ -209,7 +214,12 @@ describe("access_control", () => {
       pdas.yesMint,
       stranger.publicKey,
     );
-    const userNo = await createTokenAccount(provider.connection, payer, pdas.noMint, stranger.publicKey);
+    const userNo = await createTokenAccount(
+      provider.connection,
+      payer,
+      pdas.noMint,
+      stranger.publicKey,
+    );
 
     try {
       await m
@@ -261,7 +271,12 @@ describe("access_control", () => {
       pdas.yesMint,
       stranger.publicKey,
     );
-    const userNo = await createTokenAccount(provider.connection, payer, pdas.noMint, stranger.publicKey);
+    const userNo = await createTokenAccount(
+      provider.connection,
+      payer,
+      pdas.noMint,
+      stranger.publicKey,
+    );
 
     try {
       await m
@@ -346,8 +361,18 @@ describe("access_control", () => {
     const { pdas, userUsdc: authorityUsdc } = await freshMarket();
 
     // Authority swaps to get YES tokens (needed to seed the stranger).
-    const authorityYes = await createTokenAccount(provider.connection, payer, pdas.yesMint, authority);
-    const authorityNo = await createTokenAccount(provider.connection, payer, pdas.noMint, authority);
+    const authorityYes = await createTokenAccount(
+      provider.connection,
+      payer,
+      pdas.yesMint,
+      authority,
+    );
+    const authorityNo = await createTokenAccount(
+      provider.connection,
+      payer,
+      pdas.noMint,
+      authority,
+    );
 
     // Authority redeems some balance via redeem_pair after acquiring YES+NO
     // through deposit/withdraw cycle. Simpler path: use existing reserves —

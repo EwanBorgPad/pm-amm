@@ -13,25 +13,22 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install root deps
+      - name: Install deps (workspace)
         run: pnpm install
 
-      - name: Install app deps
-        working-directory: app
-        run: pnpm install
+      - name: Build SDK
+        run: pnpm --filter @pm-amm/sdk build
 
       - name: Prettier check
-        run: pnpm exec prettier --check "app/src/**/*.{ts,tsx}" "anchor/tests/**/*.ts"
+        run: pnpm exec prettier --check "app/src/**/*.{ts,tsx}" "packages/*/src/**/*.ts" "anchor/tests/**/*.ts"
 
       - name: ESLint
         working-directory: app

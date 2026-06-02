@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { usePositionValue } from "@/hooks/use-position-value";
 import { useLpPosition } from "@/hooks/use-lp-position";
-import { formatUsdc, poolValue, lpPositionPnl } from "@/lib/pm-math";
+import { formatUsdc, poolValue, lpPositionPnl } from "@pm-amm/sdk/math";
 import { Countdown } from "@/components/ui/countdown";
 import type { MarketData } from "@/hooks/use-markets";
-import { USDC_MINT, solscanAccountUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint } from "@/lib/pda";
+import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { PROGRAM_ID, USDC_MINT, solscanAccountUrl } from "@/lib/constants";
 import { PublicKey } from "@solana/web3.js";
 import Link from "next/link";
 
@@ -24,8 +24,8 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
   const yesP = market.price * 100;
 
   const marketPda = new PublicKey(market.publicKey);
-  const yesMint = deriveYesMint(marketPda).toBase58();
-  const noMint = deriveNoMint(marketPda).toBase58();
+  const yesMint = deriveYesMint(PROGRAM_ID, marketPda).toBase58();
+  const noMint = deriveNoMint(PROGRAM_ID, marketPda).toBase58();
 
   const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
   const { data: posValue } = usePositionValue(market.publicKey, tokens ?? null);

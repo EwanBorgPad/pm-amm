@@ -1,0 +1,282 @@
+# @pm-amm/sdk — LLM / agent reference
+
+> Machine-readable, complete API surface for the pm-AMM Solana SDK. Optimized
+> for coding agents (Claude, Codex, …) to generate correct integration code
+> WITHOUT reading the source. Every public symbol, signature, and type is here.
+> Narrative quickstart: README.md. Human visual guide: the app's `/docs` route.
+
+pm-AMM is a faithful implementation of the Paradigm pm-AMM (Moallemi & Robinson, 2024):
+prediction-market AMM with time-decaying liquidity `L_eff = L0*sqrt(T-t)` (uniform LVR),
+continuous LP yield (dC_t), and permissionless Commitment Vaults (binary + multi-outcome).
+
+## Conventions an agent MUST follow
+
+- **Amounts**: `send.*` helpers take USDC in HUMAN units (e.g. `100` = 100 USDC; converted to 6dp internally).
+  EXCEPTIONS that take RAW 6dp micro-units: `send.swap(amountInMicro, minOutputMicro)`, `send.redeemPair(amountMicro)`.
+  `ix.*` builders take raw `BN | number | bigint` for all amounts (no human conversion).
+- **Side** = `"yes" | "no"`. **SwapDirection** = `"usdcToYes" | "usdcToNo" | "yesToUsdc" | "noToUsdc" | "yesToNo" | "noToYes"`.
+- **PDAs**: pure `derive*(programId, ...)` functions take programId FIRST. The client exposes bound versions without programId (`client.yesMint(market)`).
+- **Address override**: the client overrides the bundled IDL `address` with your `programId` once; the bundled value is irrelevant.
+- **Compute budget + ATAs**: `send.*` auto-prepends the correct CU budget and creates missing associated token accounts. `ix.*` does NEITHER — you compose those yourself.
+- **Signing**: `send.*` and `flows.*` require a provider (use `fromProvider`). `ix.*`, reads, and PDA helpers work read-only.
+- **Peer deps** (consumer provides a single copy): `@solana/web3.js@^1.98`, `@anchor-lang/core@^1.0`, `@solana/spl-token@^0.4`. Browser needs a `Buffer` polyfill. `BN` is imported from `@anchor-lang/core`.
+- **Node ESM caveat**: `@anchor-lang/core` is CJS; importing the SDK's ESM build under raw Node fails on the named `BN` import. Use a bundler (Next/Vite) or the CJS build (`require`).
+
+## Devnet deployment (current)
+
+```
+PROGRAM_ID = GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y
+USDC_MINT  = 3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ   // mock USDC, 6 decimals
+```
+
+## Install
+
+```
+pnpm add @pm-amm/sdk @solana/web3.js @anchor-lang/core @solana/spl-token
+```
+
+## Entry: PmAmmClient
+
+```ts
+import { PmAmmClient } from "@pm-amm/sdk";
+
+interface PmAmmConfig {
+  connection: Connection;
+  programId: PublicKey;          // required
+  collateralMint: PublicKey;     // required (USDC mint)
+  metaplexProgramId?: PublicKey; // default: Metaplex Token Metadata
+  provider?: AnchorProvider;     // present => send.* / flows.* enabled
+  commitment?: Commitment;       // default "confirmed"
+}
+
+new PmAmmClient(cfg: PmAmmConfig): PmAmmClient
+PmAmmClient.readOnly(connection, programId, collateralMint, opts?): PmAmmClient
+PmAmmClient.fromProvider(provider, programId, collateralMint, opts?): PmAmmClient
+
+// instance fields
+client.connection: Connection
+client.programId / collateralMint / metaplexProgramId: PublicKey
+client.program: Program<PmAmm>          // raw Anchor program (typed)
+client.accounts: ProgramAccountNamespace
+client.ix: { ...26 builders }            // see "Instruction builders"
+client.send: { ...send helpers }         // see "Send helpers"
+client.flows: { ...orchestrations }      // see "Flows"
+
+// instance methods
+client.requireProvider(): AnchorProvider          // throws if read-only
+client.walletPubkey(): PublicKey                   // signer pubkey
+client.sendIxs(ixs: TransactionInstruction[], signers?: Signer[]): Promise<string>
+```
+
+## PDA helpers (bound; all return PublicKey)
+
+```ts
+client.marketPda(id: number|bigint)
+client.yesMint(market) / client.noMint(market) / client.marketVault(market)
+client.lpPosition(market, owner)
+client.groupPda(id)
+client.vaultPda(id) / client.vaultCollateral(vault) / client.commitPosition(vault, owner)
+client.vaultGroupPda(id) / client.vaultGroupCollateral(vault) / client.commitGroupPosition(vault, owner)
+client.metadataPda(mint)
+```
+
+Pure equivalents (exported, take programId first): `deriveMarketPda`, `deriveYesMint`, `deriveNoMint`,
+`deriveMarketVault`, `deriveLpPosition`, `deriveGroupPda`, `deriveVaultPda`, `deriveVaultCollateralPda`,
+`deriveCommitPositionPda`, `deriveVaultGroupPda`, `deriveVaultGroupCollateralPda`,
+`deriveCommitGroupPositionPda`, `deriveMetadataPda(mint, metaplexProgramId?)`.
+
+## Reads (typed, decoded; `*All` return `{publicKey, account}[]`)
+
+```ts
+client.fetchMarket(pda): Promise<MarketAccount | null>
+client.fetchAllMarkets(dataSize?: number)           // pass 443 to filter to current Market layout
+client.fetchGroup(pda): Promise<GroupMarketAccount | null>
+client.fetchAllGroups(dataSize?)
+client.fetchLpPosition(market, owner): Promise<LpPositionAccount | null>
+client.fetchVault(pda): Promise<CommitmentVaultAccount | null>
+client.fetchAllVaults(dataSize?)
+client.fetchCommitPosition(vault, owner): Promise<CommitPositionAccount | null>
+client.fetchVaultGroup(pda): Promise<CommitmentVaultGroupAccount | null>
+client.fetchAllVaultGroups(dataSize?)
+client.fetchCommitGroupPosition(vault, owner): Promise<CommitPositionGroupAccount | null>
+```
+
+## Instruction builders — client.ix.* (each async => TransactionInstruction)
+
+Binary market:
+```ts
+client.ix.initializeMarket({ authority: PublicKey, marketId: number|bigint, endTs: number|bigint, name: string, initialPriceBps: number })
+client.ix.depositLiquidity({ signer: PublicKey, market: PublicKey, amount: BN|number|bigint })
+client.ix.swap({ signer, market, direction: SwapDirection, amountIn: BN|number|bigint, minOutput: BN|number|bigint })
+client.ix.withdrawLiquidity({ signer, market, sharesToBurn: BN|number|bigint })   // shares are Q64.64
+client.ix.accrue({ market })
+client.ix.claimLpResiduals({ signer, market })
+client.ix.redeemPair({ signer, market, amount })
+client.ix.suggestLZero({ market, budgetUsdc, sigmaBps })   // view-only, emits LZeroSuggestion event
+client.ix.resolveMarket({ signer, market, side: Side })    // authority-only, after expiry
+client.ix.claimWinnings({ signer, market, amount?: BN|number|bigint })   // amount ignored on-chain
+```
+
+Group (multi-outcome categorical):
+```ts
+client.ix.initializeGroupMarket({ authority, groupId, endTs, name, legCount: number })   // legCount 2..32
+client.ix.attachLegToGroup({ authority, group: PublicKey, market: PublicKey, legIndex: number })
+client.ix.resolveGroup({ authority, group, winningLeg: number })
+client.ix.resolveGroupLeg({ group, market, legIndex })   // permissionless cascade
+client.ix.cancelGroupMarket({ authority, group })
+```
+
+Commitment vault (binary, Sprint 22):
+```ts
+client.ix.initializeVault({ authority, vaultId, name, commitDurationSecs: number|bigint, marketDurationSecs: number|bigint, minTotal: BN|number|bigint })
+client.ix.vaultCommit({ signer, vault, side: Side, amount })
+client.ix.launchVaultMarket({ payer, vault, marketId })   // permissionless after commit_end_ts
+client.ix.claimCommitter({ signer, vault, market })
+client.ix.refundCommit({ signer, vault })
+```
+
+Commitment vault group (multi-outcome, Sprint 23):
+```ts
+client.ix.initializeVaultGroup({ authority, vaultId, name, legNames: string[], commitDurationSecs, marketDurationSecs, minTotal })  // legNames 2..8
+client.ix.vaultCommitGroup({ signer, vault, legIndex: number, amount })
+client.ix.launchVaultGroupMarket({ payer, vault, groupId })       // step 1: wrapper group
+client.ix.launchVaultGroupLeg({ payer, vault, group, legIndex, marketId })   // step 2: once per leg
+client.ix.claimCommitterGroup({ signer, vault, group, market, legIndex })
+client.ix.refundCommitGroup({ signer, vault })
+```
+
+## Send helpers — client.send.* (require provider; auto CU + ATA; return signature unless noted)
+
+```ts
+// binary market
+client.send.createMarket(input: CreateMarketInput): Promise<{ marketId: number; marketPda: string; signature: string }>
+client.send.swap(market, direction: SwapDirection, amountInMicro: number|BN, minOutputMicro: number|BN): Promise<string>
+client.send.depositLiquidity(market, amountUsdc: number): Promise<string>
+client.send.withdrawLiquidity(market, sharesToBurn: BN|number): Promise<string>
+client.send.redeemPair(market, amountMicro: number|BN): Promise<string>
+client.send.claimWinnings(market): Promise<string>
+client.send.claimLpResiduals(market): Promise<string>
+client.send.resolveMarket(market, side: Side): Promise<string>
+client.send.accrue(market): Promise<string>
+// binary vault
+client.send.createVault(input: CreateVaultInput): Promise<{ vaultId: number; vaultPda: string; signature: string }>
+client.send.vaultCommit(vault, side: Side, amountUsdc: number): Promise<string>
+client.send.launchVaultMarket(vault): Promise<{ marketId: number; marketPda: string; signature: string }>
+client.send.claimCommitter(vault, market): Promise<string>
+client.send.refundCommit(vault): Promise<string>
+// multi-outcome vault
+client.send.createVaultGroup(input: CreateVaultGroupInput): Promise<{ vaultId: number; vaultPda: string; signature: string }>
+client.send.vaultCommitGroup(vault, legIndex: number, amountUsdc: number): Promise<string>
+client.send.launchVaultGroupMarket(vault): Promise<{ groupId: number; groupPda: string; signature: string }>
+client.send.launchVaultGroupLeg(vault, group, legIndex: number): Promise<{ marketId: number; marketPda: string; signature: string }>
+client.send.claimCommitterGroup(vault, group, market, legIndex: number): Promise<string>
+client.send.refundCommitGroup(vault): Promise<string>
+```
+
+## Flows — client.flows.* (require provider; multi-transaction)
+
+```ts
+client.flows.createGroup(
+  input: GroupCreateInput,
+  onProgress?: (label: string, step: number) => void,
+): Promise<{ groupId: number; groupPda: string; legMarketIds: number[] }>
+
+client.flows.resolveGroup(args: {
+  group: PublicKey;
+  legMarkets: (PublicKey | null)[];   // index = leg index; null = unattached slot
+  winningLeg: number | null;          // null = cancel (all legs resolve NO)
+  onProgress?: (label: string, i: number, total: number) => void;
+}): Promise<void>
+
+client.flows.findClaimableLegs(
+  legMarkets: (PublicKey | null)[],
+  owner?: PublicKey,                  // defaults to wallet
+): Promise<ClaimableLeg[]>            // ClaimableLeg = { market: PublicKey; legIndex: number; yesBalance: number; noBalance: number }
+
+client.flows.claimAllGroupWinnings(args: {
+  legMarkets: (PublicKey | null)[];
+  onProgress?: (label: string, i: number, total: number) => void;
+}): Promise<{ legsClaimed: number }>
+```
+
+## Input types
+
+```ts
+interface CreateMarketInput { name: string; durationSecs: number; initialPriceBps?: number; depositUsdc?: number }
+interface CreateVaultInput { name: string; commitDurationSecs: number; marketDurationSecs: number; minTotalUsdc: number }
+interface CreateVaultGroupInput { name: string; legNames: string[]; commitDurationSecs: number; marketDurationSecs: number; minTotalUsdc: number }  // legNames 2..8
+interface GroupCreateInput { name: string; legNames: string[]; durationSecs: number; budgetPerLegUsdc: number }  // legNames 2..32
+```
+
+## Account types (decoded; BN for u64/u128/i64, PublicKey for pubkeys; `name` is number[])
+
+```ts
+MarketAccount { authority, marketId, collateralMint, yesMint, noMint, vault, startTs, endTs, lZero, reserveYes,
+  reserveNo, lastAccrualTs, cumYesPerShare, cumNoPerShare, totalYesDistributed, totalNoDistributed, totalLpShares,
+  resolved: boolean, winningSide: number, bump, name, initialPriceBps: number, group: PublicKey }
+GroupMarketAccount { authority, groupId, startTs, endTs, legCount: number, legs: PublicKey[], resolved, winningLeg: number, bump, name, totalSeededBps: number }
+LpPositionAccount { owner, market, shares, collateralDeposited, yesPerShareCheckpoint, noPerShareCheckpoint, bump }
+CommitmentVaultAccount { authority, vaultId, collateralMint, name, commitEndTs, marketEndTs, yesTotal, noTotal, commitCount: number, minTotal, launched: boolean, winningPriceBps: number, market, lpPosition, bump }
+CommitPositionAccount { vault, owner, yesAmount, noAmount, claimed: boolean, bump }
+CommitmentVaultGroupAccount { authority, vaultId, collateralMint, name, legCount: number, legNames: number[][], legTotals: BN[], commitEndTs, marketEndTs, commitCount: number, minTotal, groupMarketInitialized: boolean, legsLaunched: number, groupMarket, bump }
+CommitPositionGroupAccount { vault, owner, legAmounts: BN[], claimed: boolean, bump }
+```
+
+## Math — `@pm-amm/sdk/math` (pure, no chain deps; float64, display/estimation)
+
+```ts
+i80f48ToNumber(raw): number                 // Q64.64 BN/bigint -> number (precision-safe)
+phi(z) / capitalPhi(z) / phiInv(p): number  // normal pdf / cdf / inverse-cdf
+priceFromReserves(x, y, lEff): number       // P = Phi((y-x)/lEff)
+poolValue(price, lEff): number              // V(P) = lEff * phi(Phi^-1(P))
+estimateSwapOutput(reserveYes, reserveNo, lEff, amountIn, side: "yes"|"no"): { output, priceAfter, priceImpact }
+expectedDailyLvr(price, lEff, remainingSecs): number
+expectedTerminalWealth(deposited): number
+simulateLpDeposit(amount, price, lEff, totalShares, remainingSecs, lZero): { newShares, poolSharePct, newPoolValue, estDailyYield }
+lpPositionPnl(shares, totalShares, deposited, price, lEff, cumYesPerShare?, cumNoPerShare?, yesCheckpoint?, noCheckpoint?, walletYes?, walletNo?, reserveYes?, reserveNo?): LpPnlResult
+formatUsdc(lamports): string                // 6dp -> "1,234.56"
+formatPrice(price): string                  // 0.512 -> "51.2%"
+formatTimeRemaining(endTs): string
+// group helpers
+expectedLegSeedBps(legCount) / expectedLegSeedPrice(legCount)
+sumProbabilities(prices: number[]) / groupDriftPct(prices: number[])
+legBudgetAllocations(legCount, totalLamports): number[]
+expectedDriftAfterBet(legReserveYes, legReserveNo, legLEff, betUsd, side?): number
+```
+
+## Errors & constants
+
+```ts
+import { mapAnchorError, PM_AMM_ERRORS } from "@pm-amm/sdk";
+mapAnchorError(err: unknown): { code: number; name: string; msg?: string } | null
+
+import { METAPLEX_PROGRAM_ID, SYSVAR_RENT_PUBKEY, CU, SEEDS, solscanTxUrl, solscanAccountUrl } from "@pm-amm/sdk";
+// CU = { DEFAULT: 400000, HEAVY: 1400000 }
+// solscanTxUrl(sig, cluster?) / solscanAccountUrl(addr, cluster?)  cluster default "devnet"
+```
+
+## Recipes
+
+```ts
+// Read-only: list markets + price
+const client = PmAmmClient.readOnly(conn, PROGRAM_ID, USDC_MINT);
+const markets = await client.fetchAllMarkets(443);
+
+// Create + bootstrap a market (one tx)
+await client.send.createMarket({ name: "Will X ship?", durationSecs: 86_400, initialPriceBps: 5000, depositUsdc: 100 });
+
+// Buy YES with 10 USDC, 1% slippage (compute minOut off-chain via math)
+await client.send.swap(market, "usdcToYes", 10_000_000, minOutMicro);
+
+// Crowd-bootstrapped binary market
+const { vaultPda } = await client.send.createVault({ name, commitDurationSecs: 3600, marketDurationSecs: 86_400, minTotalUsdc: 50 });
+await client.send.vaultCommit(vault, "yes", 25);
+const { marketPda } = await client.send.launchVaultMarket(vault);
+await client.send.claimCommitter(vault, marketPda);
+
+// Compose a custom tx from raw builders (no auto CU/ATA)
+import { ComputeBudgetProgram, Transaction } from "@solana/web3.js";
+const ix = await client.ix.swap({ signer, market, direction: "usdcToYes", amountIn: 10_000_000, minOutput: minOut });
+const tx = new Transaction().add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }), ix);
+await provider.sendAndConfirm(tx, []);
+```

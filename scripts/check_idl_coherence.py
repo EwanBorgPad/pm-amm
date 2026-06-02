@@ -37,11 +37,34 @@ EXPECTED = {
         "owner", "market", "shares", "collateral_deposited",
         "yes_per_share_checkpoint", "no_per_share_checkpoint", "bump",
     ],
+    "CommitmentVault": [
+        "authority", "vault_id", "collateral_mint", "name",
+        "commit_end_ts", "market_end_ts",
+        "yes_total", "no_total", "commit_count", "min_total",
+        "launched", "winning_price_bps", "market", "lp_position",
+        "bump", "_reserved",
+    ],
+    "CommitPosition": [
+        "vault", "owner", "yes_amount", "no_amount", "claimed", "bump", "_reserved",
+    ],
+    "CommitmentVaultGroup": [
+        "authority", "vault_id", "collateral_mint", "name",
+        "leg_count", "leg_names", "leg_totals",
+        "commit_end_ts", "market_end_ts",
+        "commit_count", "min_total",
+        "group_market_initialized", "legs_launched", "group_market",
+        "bump", "_reserved",
+    ],
+    "CommitPositionGroup": [
+        "vault", "owner", "leg_amounts", "claimed", "bump", "_reserved",
+    ],
 }
 
 IDL_PATHS = [
     REPO_ROOT / "idl" / "pm_amm.json",
-    REPO_ROOT / "app" / "src" / "lib" / "pm_amm_idl.json",
+    # Canonical copy bundled by the SDK (the app no longer ships its own IDL —
+    # it consumes @pm-amm/sdk). Kept in sync via `pnpm run sync:idl`.
+    REPO_ROOT / "packages" / "sdk" / "src" / "idl" / "pm_amm.json",
 ]
 
 

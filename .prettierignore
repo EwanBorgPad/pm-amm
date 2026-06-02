@@ -1,0 +1,10 @@
+# Generated artifacts — produced by `anchor build` / `anchor idl build` and
+# copied by scripts/sync-idl.mjs. Not hand-formatted, so a fresh IDL sync must
+# not trip the prettier style check.
+packages/sdk/src/idl/pm_amm.ts
+packages/sdk/src/idl/pm_amm.json
+idl/pm_amm.json
+
+# Build output
+**/dist/**
+**/.next/**

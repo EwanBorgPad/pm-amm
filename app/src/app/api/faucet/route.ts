@@ -14,7 +14,7 @@ export async function POST(req: Request) {
   // Read the USDC mint from env so the faucet matches the fork's deployment.
   // Falls back to Matt's devnet mint if the env var is unset, for back-compat.
   const usdcMintStr =
-    process.env.NEXT_PUBLIC_USDC_MINT || "8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A";
+    process.env.NEXT_PUBLIC_USDC_MINT || "3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ";
   const USDC_MINT = new PublicKey(usdcMintStr);
 
   if (!keyB64) {

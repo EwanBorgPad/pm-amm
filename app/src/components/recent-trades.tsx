@@ -3,8 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { useConnection } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { CLUSTER } from "@/lib/constants";
-import { deriveYesMint } from "@/lib/pda";
+import { CLUSTER, PROGRAM_ID } from "@/lib/constants";
+import { deriveYesMint } from "@pm-amm/sdk";
 
 interface TradeEvent {
   signature: string;
@@ -33,7 +33,7 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
 
   // Derive YES mint to identify YES vs NO tokens in tx balance changes
   const marketKey = new PublicKey(marketPda);
-  const yesMintKey = deriveYesMint(marketKey).toBase58();
+  const yesMintKey = deriveYesMint(PROGRAM_ID, marketKey).toBase58();
 
   const { data: trades, isLoading } = useQuery<TradeEvent[]>({
     queryKey: ["recent-trades", marketPda],
@@ -72,7 +72,7 @@ export function RecentTrades({ marketPda }: { marketPda: string }) {
           if (ixName === "Swap") {
             const pre = tx.meta?.preTokenBalances ?? [];
             const post = tx.meta?.postTokenBalances ?? [];
-            const usdcMint = "8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A";
+            const usdcMint = "3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ";
 
             // Find which non-USDC token the user received (= BUY) or sent (= SELL)
             let bought = false;

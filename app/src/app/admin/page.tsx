@@ -8,12 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useGroups, type GroupData } from "@/hooks/use-groups";
-import { useProgram } from "@/hooks/use-program";
-import { formatTimeRemaining } from "@/lib/pm-math";
-import { ComputeBudgetProgram, PublicKey } from "@solana/web3.js";
+import { useClient } from "@/lib/pm-amm-client";
+import { formatTimeRemaining } from "@pm-amm/sdk/math";
+import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
 import Link from "next/link";
-import { runResolveGroup } from "@/lib/resolve-group";
 import { seriesColor } from "@/components/multi-line-chart";
 
 type MarketStatus = "active" | "expired" | "resolved";
@@ -25,22 +24,15 @@ function getAdminStatus(m: MarketData): MarketStatus {
 }
 
 function useResolveBinary(market: MarketData) {
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const [loading, setLoading] = useState<"yes" | "no" | null>(null);
 
   const resolve = async (side: "yes" | "no") => {
-    if (!program || !publicKey) return;
+    if (!client || !publicKey) return;
     setLoading(side);
     try {
-      const marketPda = new PublicKey(market.publicKey);
-      const sideArg = side === "yes" ? { yes: {} } : { no: {} };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (program.methods as any)
-        .resolveMarket(sideArg)
-        .accounts({ signer: publicKey, market: marketPda })
-        .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
-        .rpc();
+      await client.send.resolveMarket(new PublicKey(market.publicKey), side);
       toast.success(`Resolved → ${side.toUpperCase()}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -107,7 +99,7 @@ function AdminMarketRow({ market }: { market: MarketData }) {
 }
 
 function useResolveGroupAction(group: GroupData) {
-  const program = useProgram();
+  const client = useClient();
   const { publicKey } = useWallet();
   const [pickedLeg, setPickedLeg] = useState<number | null>(null);
   const [progress, setProgress] = useState<{
@@ -117,13 +109,13 @@ function useResolveGroupAction(group: GroupData) {
   } | null>(null);
 
   const onAction = async (winningLeg: number | null) => {
-    if (!program || !publicKey) return;
+    if (!client || !publicKey) return;
     try {
-      await runResolveGroup({
-        program,
-        wallet: publicKey,
-        groupPda: new PublicKey(group.publicKey),
-        legPubkeys: group.legPubkeys,
+      const DEFAULT = "11111111111111111111111111111111";
+      const legMarkets = group.legPubkeys.map((pk) => (pk === DEFAULT ? null : new PublicKey(pk)));
+      await client.flows.resolveGroup({
+        group: new PublicKey(group.publicKey),
+        legMarkets,
         winningLeg,
         onProgress: (label, i, n) => setProgress({ label, i, n }),
       });
@@ -316,7 +308,7 @@ export default function AdminPage() {
       <StatusBar />
       <main className="flex-1 max-w-lg mx-auto w-full px-[48px] py-[32px]">
         <Link
-          href="/"
+          href="/markets"
           className="text-[12px] text-muted hover:text-text-hi transition-all duration-[120ms] mb-[16px] block font-mono tracking-[0.03em]"
         >
           ← BACK

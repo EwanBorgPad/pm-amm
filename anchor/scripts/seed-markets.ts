@@ -10,7 +10,7 @@ import * as anchor from "@anchor-lang/core";
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import { ComputeBudgetProgram, PublicKey, SystemProgram } from "@solana/web3.js";
 
-const USDC_MINT = new PublicKey("8m8VRDdvuxE4MQZBX8RqKMpuwqBYTQiME7n85Mw73j6A");
+const USDC_MINT = new PublicKey("3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ");
 const TOKEN_METADATA_PROGRAM = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
 
 const MARKETS = [
@@ -23,7 +23,7 @@ async function main() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const idl = require("../../app/src/lib/pm_amm_idl.json");
+  const idl = require("../../idl/pm_amm.json");
   const program = new anchor.Program(idl, provider);
   const payer = (provider.wallet as any).payer;
   const wallet = provider.wallet.publicKey;

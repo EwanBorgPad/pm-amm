@@ -12,11 +12,12 @@ import { ProbabilityBar } from "@/components/ui/probability-bar";
 import { MetaRow } from "@/components/ui/meta-row";
 import { Badge } from "@/components/ui/badge";
 import { useMarkets } from "@/hooks/use-markets";
+import { usePriceRecorder } from "@/hooks/use-price-recorder";
 import { useUserTokens } from "@/hooks/use-user-tokens";
-import { formatUsdc, poolValue } from "@/lib/pm-math";
+import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
 import { Countdown } from "@/components/ui/countdown";
-import { USDC_MINT, solscanAccountUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint } from "@/lib/pda";
+import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { PROGRAM_ID, USDC_MINT, solscanAccountUrl } from "@/lib/constants";
 import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -24,11 +25,15 @@ import Link from "next/link";
 export default function MarketPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: markets, isLoading } = useMarkets();
+  // Snap prices passively from this page too. Without this, users who land
+  // here via a shared deep-link don't contribute to the Redis price history
+  // and the chart stays flat. Recorder is debounced + delta-gated internally.
+  usePriceRecorder(markets);
   const market = markets?.find((m) => m.marketId === Number(id));
 
   const marketPda = market ? new PublicKey(market.publicKey) : undefined;
-  const yesMint = marketPda ? deriveYesMint(marketPda).toBase58() : undefined;
-  const noMint = marketPda ? deriveNoMint(marketPda).toBase58() : undefined;
+  const yesMint = marketPda ? deriveYesMint(PROGRAM_ID, marketPda).toBase58() : undefined;
+  const noMint = marketPda ? deriveNoMint(PROGRAM_ID, marketPda).toBase58() : undefined;
 
   const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
   const name = market?.name ?? `Market #${id}`;
@@ -38,7 +43,7 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
       <StatusBar />
       <main className="flex-1 max-w-5xl mx-auto w-full px-[48px] py-[32px]">
         <Link
-          href="/"
+          href="/markets"
           className="text-[12px] text-muted hover:text-text-hi transition-all duration-[120ms] mb-[16px] block font-mono tracking-[0.03em]"
         >
           ← BACK

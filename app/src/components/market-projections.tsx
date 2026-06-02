@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { MetaRow } from "@/components/ui/meta-row";
-import { formatUsdc, poolValue, formatTimeRemaining } from "@/lib/pm-math";
+import { formatUsdc, poolValue, formatTimeRemaining } from "@pm-amm/sdk/math";
 import type { MarketData } from "@/hooks/use-markets";
 
 export function MarketProjections({ market }: { market: MarketData }) {

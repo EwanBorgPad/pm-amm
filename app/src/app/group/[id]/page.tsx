@@ -13,18 +13,14 @@ import { MultiLineChart, seriesColor, type Series } from "@/components/multi-lin
 import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useGroup, type GroupData } from "@/hooks/use-groups";
 import { usePriceHistories } from "@/hooks/use-price-histories";
+import { usePriceRecorder } from "@/hooks/use-price-recorder";
 import { useUserTokens } from "@/hooks/use-user-tokens";
-import { useProgram } from "@/hooks/use-program";
+import { useClient } from "@/lib/pm-amm-client";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useEffect } from "react";
-import { groupDriftPct, formatUsdc } from "@/lib/pm-math";
-import { USDC_MINT, solscanAccountUrl } from "@/lib/constants";
-import { deriveYesMint, deriveNoMint } from "@/lib/pda";
-import {
-  findClaimableLegs,
-  runClaimAllGroupWinnings,
-  type ClaimableLeg,
-} from "@/lib/claim-group-winnings";
+import { groupDriftPct, formatUsdc } from "@pm-amm/sdk/math";
+import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { PROGRAM_ID, USDC_MINT, solscanAccountUrl } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 
 export default function GroupPage({ params }: { params: Promise<{ id: string }> }) {
@@ -32,13 +28,17 @@ export default function GroupPage({ params }: { params: Promise<{ id: string }> 
   const { data: markets } = useMarkets();
   const { data: group, isLoading } = useGroup(Number(id), markets);
   const priceHistories = usePriceHistories(markets);
+  // Record price snapshots passively. Without this on the group page,
+  // visitors who land here directly via a shared link don't contribute to
+  // the price history Redis store, and the multi-line chart stays flat.
+  usePriceRecorder(markets);
 
   return (
     <>
       <StatusBar />
       <main className="flex-1 mx-auto w-full max-w-7xl px-[24px] py-[24px]">
         <Link
-          href="/"
+          href="/markets"
           className="text-[12px] text-muted hover:text-text-hi transition-all duration-[120ms] mb-[16px] block font-mono tracking-[0.03em]"
         >
           ← BACK
@@ -62,6 +62,16 @@ interface GroupViewProps {
 
 function GroupView({ group, priceHistories }: GroupViewProps) {
   const [selectedIdx, setSelectedIdx] = useState<number>(0);
+  // Side intent for the trade panel, driven by the per-leg "Buy YES/NO" buttons.
+  // `nonce` bumps on every click so re-clicking the same button re-applies it.
+  const [trade, setTrade] = useState<{ side: "yes" | "no"; nonce: number }>({
+    side: "yes",
+    nonce: 0,
+  });
+  const onBet = (idx: number, side: "yes" | "no") => {
+    setSelectedIdx(idx);
+    setTrade((t) => ({ side, nonce: t.nonce + 1 }));
+  };
   const isResolved = group.resolved;
 
   const attachedLegs = useMemo(
@@ -116,13 +126,14 @@ function GroupView({ group, priceHistories }: GroupViewProps) {
           priceHistories={priceHistories}
           selectedIdx={selectedIdx}
           onSelect={setSelectedIdx}
+          onBet={onBet}
           resolved={isResolved}
           winningLeg={group.winningLeg}
         />
       </div>
 
       <aside className="xl:sticky xl:top-[16px] xl:self-start">
-        <SideTradePanel group={group} selectedIdx={selectedIdx} legs={attachedLegs} />
+        <SideTradePanel group={group} selectedIdx={selectedIdx} legs={attachedLegs} trade={trade} />
       </aside>
     </div>
   );
@@ -209,6 +220,7 @@ interface LegsTableProps {
   priceHistories: Map<string, number[]> | undefined;
   selectedIdx: number;
   onSelect: (i: number) => void;
+  onBet: (i: number, side: "yes" | "no") => void;
   resolved: boolean;
   winningLeg: number | null;
 }
@@ -218,6 +230,7 @@ function LegsTable({
   priceHistories,
   selectedIdx,
   onSelect,
+  onBet,
   resolved,
   winningLeg,
 }: LegsTableProps) {
@@ -240,6 +253,7 @@ function LegsTable({
           isWinner={resolved && winningLeg === idx}
           isLoser={resolved && winningLeg !== idx}
           onSelect={onSelect}
+          onBet={onBet}
           resolved={resolved}
         />
       ))}
@@ -255,6 +269,7 @@ interface LegRowProps {
   isWinner: boolean;
   isLoser: boolean;
   onSelect: (i: number) => void;
+  onBet: (i: number, side: "yes" | "no") => void;
   resolved: boolean;
 }
 
@@ -266,6 +281,7 @@ function LegRow({
   isWinner,
   isLoser,
   onSelect,
+  onBet,
   resolved,
 }: LegRowProps) {
   const delta = history.length >= 2 ? market.price - history[0] : 0;
@@ -276,9 +292,9 @@ function LegRow({
     isLoser ? "opacity-40" : "",
   ].join(" ");
 
-  const click = (e: React.MouseEvent) => {
+  const bet = (side: "yes" | "no") => (e: React.MouseEvent) => {
     e.stopPropagation();
-    onSelect(idx);
+    onBet(idx, side);
   };
 
   return (
@@ -312,8 +328,8 @@ function LegRow({
           </div>
         )}
       </div>
-      <BetButton side="yes" price={market.price} disabled={resolved} onClick={click} />
-      <BetButton side="no" price={1 - market.price} disabled={resolved} onClick={click} />
+      <BetButton side="yes" price={market.price} disabled={resolved} onClick={bet("yes")} />
+      <BetButton side="no" price={1 - market.price} disabled={resolved} onClick={bet("no")} />
     </div>
   );
 }
@@ -348,15 +364,20 @@ interface SideTradePanelProps {
   group: GroupData;
   selectedIdx: number;
   legs: { market: MarketData; idx: number }[];
+  trade: { side: "yes" | "no"; nonce: number };
 }
 
-function SideTradePanel({ group, selectedIdx, legs }: SideTradePanelProps) {
+function SideTradePanel({ group, selectedIdx, legs, trade }: SideTradePanelProps) {
   const selected = legs.find((l) => l.idx === selectedIdx) ?? legs[0];
   const market = selected?.market;
 
   // Compute YES/NO token mints to fetch the user balances for the selected leg.
-  const yesMint = market ? deriveYesMint(new PublicKey(market.publicKey)).toBase58() : undefined;
-  const noMint = market ? deriveNoMint(new PublicKey(market.publicKey)).toBase58() : undefined;
+  const yesMint = market
+    ? deriveYesMint(PROGRAM_ID, new PublicKey(market.publicKey)).toBase58()
+    : undefined;
+  const noMint = market
+    ? deriveNoMint(PROGRAM_ID, new PublicKey(market.publicKey)).toBase58()
+    : undefined;
   const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
 
   if (!market) {
@@ -386,13 +407,24 @@ function SideTradePanel({ group, selectedIdx, legs }: SideTradePanelProps) {
         </div>
       </div>
 
-      <TradePanel market={market} tokens={tokens ?? null} />
+      <TradePanel
+        market={market}
+        tokens={tokens ?? null}
+        presetSide={trade.side}
+        presetNonce={trade.nonce}
+      />
     </div>
   );
 }
 
+interface ClaimableDisplay {
+  legIndex: number;
+  name: string;
+  expectedPayout: number;
+}
+
 interface ClaimAllState {
-  claimable: ClaimableLeg[] | null;
+  claimable: ClaimableDisplay[] | null;
   progress: { label: string; i: number; n: number } | null;
   loading: boolean;
   totalMicroUsdc: number;
@@ -400,40 +432,58 @@ interface ClaimAllState {
 }
 
 function useGroupClaimAll(group: GroupData): ClaimAllState {
-  const program = useProgram();
   const { publicKey } = useWallet();
-  const [claimable, setClaimable] = useState<ClaimableLeg[] | null>(null);
+  const client = useClient();
+  const [claimable, setClaimable] = useState<ClaimableDisplay[] | null>(null);
   const [progress, setProgress] = useState<ClaimAllState["progress"]>(null);
   const [loading, setLoading] = useState(false);
 
+  const legMarkets = useMemo(
+    () => group.legs.map((m) => (m ? new PublicKey(m.publicKey) : null)),
+    [group.legs],
+  );
+
   useEffect(() => {
-    if (!program || !publicKey || !group.resolved) {
+    if (!client || !publicKey || !group.resolved) {
       setClaimable(null);
       return;
     }
     let cancelled = false;
-    findClaimableLegs(program, publicKey, group)
-      .then((c) => !cancelled && setClaimable(c))
+    client.flows
+      .findClaimableLegs(legMarkets, publicKey)
+      .then((found) => {
+        if (cancelled) return;
+        // Winning side per leg: the resolved leg pays its YES holders; every
+        // other leg (and all legs when cancelled) pays its NO holders.
+        setClaimable(
+          found.map((c) => {
+            const isYesWinner = group.winningLeg !== null && group.winningLeg === c.legIndex;
+            return {
+              legIndex: c.legIndex,
+              name: group.legs[c.legIndex]?.name ?? `Leg #${c.legIndex}`,
+              expectedPayout: isYesWinner ? c.yesBalance : c.noBalance,
+            };
+          }),
+        );
+      })
       .catch(() => !cancelled && setClaimable([]));
     return () => {
       cancelled = true;
     };
-  }, [program, publicKey, group]);
+  }, [client, publicKey, group, legMarkets]);
 
   const totalMicroUsdc = (claimable ?? []).reduce((s, c) => s + c.expectedPayout, 0);
 
   const onClaim = async () => {
-    if (!program || !publicKey || !claimable || claimable.length === 0) return;
+    if (!client || !publicKey || !claimable || claimable.length === 0) return;
     setLoading(true);
     try {
-      const { legsClaimed, estimatedMicroUsdc } = await runClaimAllGroupWinnings({
-        program,
-        wallet: publicKey,
-        group,
+      const { legsClaimed } = await client.flows.claimAllGroupWinnings({
+        legMarkets,
         onProgress: (label, i, n) => setProgress({ label, i, n }),
       });
       setProgress(null);
-      toast.success(`Claimed ${legsClaimed} legs · ~${formatUsdc(estimatedMicroUsdc)} USDC`);
+      toast.success(`Claimed ${legsClaimed} legs · ~${formatUsdc(totalMicroUsdc)} USDC`);
       setClaimable([]); // optimistic: positions consumed
     } catch (err) {
       setProgress(null);
@@ -501,7 +551,7 @@ function ClaimAllBody({ state }: { state: ClaimAllState }) {
       <div className="border-t border-line pt-[8px] space-y-[4px]">
         {claimable.map((c) => (
           <div key={c.legIndex} className="flex justify-between text-[11px] font-mono">
-            <span className="text-muted truncate flex-1 mr-[8px]">{c.market.name}</span>
+            <span className="text-muted truncate flex-1 mr-[8px]">{c.name}</span>
             <span className="text-text-hi tabular-nums">{formatUsdc(c.expectedPayout)} USDC</span>
           </div>
         ))}

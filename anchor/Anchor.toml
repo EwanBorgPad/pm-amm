@@ -8,10 +8,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-pm_amm = "8V872cTKfH1gC5zBvQhrQN2DXSmRNokPPjPsBE46MZNj"
+pm_amm = "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
 
 [programs.localnet]
-pm_amm = "Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK"
+pm_amm = "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
 
 [provider]
 cluster = "localnet"
@@ -29,11 +29,9 @@ upgradeable = false
 
 [test.validator]
 bind_address = "0.0.0.0"
+url = "https://api.devnet.solana.com"
 ledger = ".anchor/test-ledger"
 rpc_port = 8899
-# Clone Metaplex Token Metadata Program from devnet so `initialize_market`
-# CPI calls don't crash with "Unsupported program id" on a vanilla localnet.
-url = "https://api.devnet.solana.com"
 
 [[test.validator.clone]]
 address = "metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s"

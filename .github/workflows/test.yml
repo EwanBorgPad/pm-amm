@@ -52,19 +52,19 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install dependencies
-        working-directory: app
+      - name: Install dependencies (workspace)
         run: pnpm install
+
+      - name: Build SDK
+        run: pnpm --filter @pm-amm/sdk build
 
       - name: Type-check
         working-directory: app
