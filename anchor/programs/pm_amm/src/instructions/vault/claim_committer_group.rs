@@ -7,9 +7,9 @@
 //!
 //! Users with N legs committed call this N times. We chose this over a
 //! single "claim all" instruction to keep account count and compute budget
-//! comfortably under their per-tx limits (one leg launch creates a Market
-//! + 2 mints + a vault + 2 metadata accounts, so claiming all 8 in one tx
-//! would balloon to 40+ accounts).
+//! comfortably under their per-tx limits (one leg launch creates a Market,
+//! two mints, a vault and two metadata accounts, so claiming all 8 in one
+//! tx would balloon to 40+ accounts).
 //!
 //! Resolution flow: after `resolve_group` + cascade, the winning leg's
 //! YES tokens redeem for 1 USDC each via `claim_winnings`; losing legs'

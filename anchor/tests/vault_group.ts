@@ -10,13 +10,7 @@
 import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PmAmm } from "../target/types/pm_amm";
-import {
-  PublicKey,
-  SystemProgram,
-  Keypair,
-  type Connection,
-  type Signer,
-} from "@solana/web3.js";
+import { PublicKey, SystemProgram, Keypair, type Connection, type Signer } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo } from "@solana/spl-token";
 import { assert } from "chai";
 

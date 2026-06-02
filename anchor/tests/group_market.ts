@@ -437,7 +437,10 @@ describe("group_market", () => {
     const { pdas } = await initLeg({ endTs, initialPriceBps: 5000 });
     await attach(groupPda, pdas.marketPda, 0);
     try {
-      await m.resolveGroupLeg(0).accountsPartial({ groupMarket: groupPda, market: pdas.marketPda }).rpc();
+      await m
+        .resolveGroupLeg(0)
+        .accountsPartial({ groupMarket: groupPda, market: pdas.marketPda })
+        .rpc();
       assert.fail("Should reject when group not resolved");
     } catch (err) {
       assert.include(String(err), "GroupNotResolved");
