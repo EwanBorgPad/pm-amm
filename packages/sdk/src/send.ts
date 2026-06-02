@@ -128,7 +128,9 @@ export function makeSend(client: PmAmmClient) {
       const signer = client.walletPubkey();
       const pre = await ataPreIxs([client.yesMint(market), client.noMint(market)]);
       const ix = await client.ix.claimLpResiduals({ signer, market });
-      return client.sendIxs([computeBudgetIx(CU.DEFAULT), ...pre, ix]);
+      // Residual accrual + dual mint-to is compute-heavy — matches the app's
+      // original 1.4M budget; 400k can trip "Program failed to complete".
+      return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },
 
     async resolveMarket(market: PublicKey, side: Side) {
