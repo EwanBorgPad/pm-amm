@@ -18,6 +18,10 @@ One typed `PmAmmClient` wraps everything:
 > **Coding agents (Claude / Codex):** read [`llms.txt`](./llms.txt) — a dense, complete
 > API reference (every signature + type + recipes) written for LLM consumption. Live
 > deployments also serve it at `/llms.txt`.
+>
+> **Full per-function reference:** [`doc/api-reference.md`](../../doc/api-reference.md) documents
+> every on-chain instruction (accounts, args, behavior, errors) **and** every SDK function
+> individually — the deep companion to this 5-minute quickstart.
 
 ## Install
 
