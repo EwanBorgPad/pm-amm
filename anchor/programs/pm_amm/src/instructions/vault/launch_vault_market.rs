@@ -28,10 +28,13 @@ use anchor_spl::metadata::mpl_token_metadata::instructions::{
     CreateMetadataAccountV3, CreateMetadataAccountV3InstructionArgs,
 };
 use anchor_spl::metadata::mpl_token_metadata::types::DataV2;
-use anchor_spl::token::{Mint, Token, TokenAccount};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use fixed::types::I80F48;
 
 use crate::errors::PmAmmError;
 use crate::instructions::initialize_market::{NO_MINT_SEED, VAULT_SEED, YES_MINT_SEED};
+use crate::instructions::vault::VAULT_COLLATERAL_SEED;
+use crate::pm_math;
 use crate::state::{CommitmentVault, Market};
 
 #[derive(Accounts)]
@@ -91,6 +94,15 @@ pub struct LaunchVaultMarket<'info> {
     )]
     pub market_vault: Box<Account<'info, TokenAccount>>,
 
+    /// The commitment vault's collateral ATA — its committed USDC is deposited
+    /// into `market_vault` here as the bootstrap liquidity (option C).
+    #[account(
+        mut,
+        seeds = [VAULT_COLLATERAL_SEED, vault.key().as_ref()],
+        bump,
+    )]
+    pub vault_collateral: Box<Account<'info, TokenAccount>>,
+
     /// CHECK: Created via CPI to Metaplex Token Metadata program.
     #[account(mut)]
     pub yes_metadata: UncheckedAccount<'info>,
@@ -141,15 +153,28 @@ pub fn handler(ctx: Context<LaunchVaultMarket>, market_id: u64) -> Result<()> {
     let mut name_bytes = [0u8; 64];
     name_bytes[..vault.name.len().min(64)].copy_from_slice(&vault.name);
     market.name = name_bytes;
-    market.l_zero = 0;
-    market.reserve_yes = 0;
-    market.reserve_no = 0;
+    // Bootstrap the AMM with the WHOLE committed pot as liquidity (option C,
+    // audit #6): committers become LPs. Calibrate L_0 so max(x,y) = total at the
+    // commit-ratio price (fix #1 solvency) and set total_lp_shares = total. The
+    // USDC is moved vault_collateral -> market_vault at the end of this handler.
+    let total = vault.total();
+    let vault_id_bytes = vault.vault_id.to_le_bytes();
+    let vault_bump = vault.bump;
+    let time_remaining = market_end_ts - now;
+    let price = I80F48::from_num(price_bps) / I80F48::from_num(10_000u16);
+    let l_zero = pm_math::suggest_l_zero_for_max_reserve(total, time_remaining, price)?;
+    let l_eff = pm_math::l_effective(l_zero, time_remaining)?;
+    let (x, y) = pm_math::reserves_from_price(price, l_eff)?;
+
+    market.set_l_zero_fixed(l_zero);
+    market.set_reserve_yes_fixed(x);
+    market.set_reserve_no_fixed(y);
     market.last_accrual_ts = now;
     market.cum_yes_per_share = 0;
     market.cum_no_per_share = 0;
     market.total_yes_distributed = 0;
     market.total_no_distributed = 0;
-    market.total_lp_shares = 0;
+    market.set_total_lp_shares_fixed(I80F48::from_num(total));
     market.resolved = false;
     market.winning_side = 0;
     market.bump = ctx.bumps.market;
@@ -193,8 +218,6 @@ pub fn handler(ctx: Context<LaunchVaultMarket>, market_id: u64) -> Result<()> {
     vault.launched = true;
     vault.winning_price_bps = price_bps;
     vault.market = ctx.accounts.market.key();
-    // lp_position will be set when the vault later deposits its USDC
-    // via `deposit_liquidity` as a follow-up tx.
 
     msg!(
         "Vault {} launched market {} at price_bps={} (yes={} no={} total={})",
@@ -205,6 +228,28 @@ pub fn handler(ctx: Context<LaunchVaultMarket>, market_id: u64) -> Result<()> {
         vault.no_total,
         vault.total()
     );
+
+    // Move the committed pot into the market vault as the LP collateral that
+    // backs the bootstrapped reserves. The commitment vault PDA signs. (The
+    // `vault` &mut binding's borrow has ended above, so we use ctx.accounts.)
+    let vault_seeds: &[&[&[u8]]] = &[&[
+        CommitmentVault::SEED,
+        vault_id_bytes.as_ref(),
+        &[vault_bump],
+    ]];
+    token::transfer(
+        CpiContext::new_with_signer(
+            ctx.accounts.token_program.key(),
+            Transfer {
+                from: ctx.accounts.vault_collateral.to_account_info(),
+                to: ctx.accounts.market_vault.to_account_info(),
+                authority: ctx.accounts.vault.to_account_info(),
+            },
+            vault_seeds,
+        ),
+        total,
+    )?;
+
     Ok(())
 }
 
