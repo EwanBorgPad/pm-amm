@@ -206,18 +206,25 @@ export function simulateLpDeposit(
     };
   }
 
-  const currentValue = poolValue(price, lEff);
-  if (currentValue <= 0)
-    return { newShares: 0, poolSharePct: 0, newPoolValue: 0, estDailyYield: 0 };
+  if (lZero <= 0) return { newShares: 0, poolSharePct: 0, newPoolValue: 0, estDailyYield: 0 };
 
-  const newShares = (amount * totalShares) / currentValue;
+  // Fix #1 (full collateralization): shares are 1:1 with USDC of backing, and a
+  // follow-up deposit adds L_eff for `amount` at the worst-case side
+  // (max(x, y) = amount), matching deposit_liquidity on-chain. The vault always
+  // covers the bigger side, so this mirrors that calibration, not V(P).
+  const u = phiInv(price);
+  const pu = phi(u);
+  const cY = u * price + pu; // y reserve coefficient
+  const cX = cY - u; // x reserve coefficient
+  const cMax = Math.max(cX, cY);
+  if (cMax <= 0) return { newShares: 0, poolSharePct: 0, newPoolValue: 0, estDailyYield: 0 };
+
+  const newShares = amount;
   const newTotal = totalShares + newShares;
   const poolSharePct = (newShares / newTotal) * 100;
 
-  // New L_eff after deposit
-  const scale = newTotal / totalShares;
-  const newLZero = lZero * scale;
-  const newLEff = newLZero * Math.sqrt(Math.max(remainingSecs, 1));
+  // New L_eff after deposit: L_eff += amount / cMax (L_0 is linear in budget).
+  const newLEff = lEff + amount / cMax;
   const newPoolValue = poolValue(price, newLEff);
 
   const estDailyYield =

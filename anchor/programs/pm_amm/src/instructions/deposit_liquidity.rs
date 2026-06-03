@@ -70,10 +70,13 @@ pub fn handler(ctx: Context<DepositLiquidity>, amount: u64) -> Result<()> {
 
         if market.total_lp_shares == 0 {
             // First deposit: bootstrap L_0 at the seed price encoded in
-            // `Market::initial_price_bps`. 0 = legacy 50/50; otherwise the
-            // pool calibrates so `V(initial_price) == amount`.
+            // `Market::initial_price_bps`. 0 = legacy 50/50; otherwise the pool
+            // calibrates so `max(x, y) == amount` — the vault must cover the
+            // bigger side's full token count, since the winning side redeems
+            // 1 USDC each (fix #1: V(P) only covers it at P=0.5).
             let target_price = market.initial_price_fixed();
-            let l_zero = pm_math::suggest_l_zero_at_price(amount, time_remaining, target_price)?;
+            let l_zero =
+                pm_math::suggest_l_zero_for_max_reserve(amount, time_remaining, target_price)?;
             let l_eff = pm_math::l_effective(l_zero, time_remaining)?;
             let (x, y) = pm_math::reserves_from_price(target_price, l_eff)?;
 
@@ -83,27 +86,27 @@ pub fn handler(ctx: Context<DepositLiquidity>, amount: u64) -> Result<()> {
             market.set_reserve_no_fixed(y);
             market.set_total_lp_shares_fixed(amount_fixed);
         } else {
+            // Follow-up deposit: keep the current price, and add backing for
+            // `amount` USDC at the worst-case side (fix #1). L_0 is linear in the
+            // budget, so the same calibration yields the L_0 *increment*. Shares
+            // are denominated 1:1 in USDC of backing, so `vault == total_lp_shares`
+            // holds by construction and the pool stays fully collateralized.
             let l_eff = market.l_effective(now)?;
             let price = pm_math::price_from_reserves(
                 market.reserve_yes_fixed(),
                 market.reserve_no_fixed(),
                 l_eff,
             )?;
-            let current_value = pm_math::pool_value(price, l_eff)?;
-            require!(
-                current_value > I80F48::ZERO,
-                PmAmmError::InsufficientLiquidity
-            );
 
             let total_shares = market.total_lp_shares_fixed();
-            new_shares = amount_fixed * total_shares / current_value;
-            let new_total = total_shares + new_shares;
-
-            let old_l_zero = market.l_zero_fixed();
-            let scale = new_total / total_shares;
-            let new_l_zero = old_l_zero * scale;
+            let l_zero_increment =
+                pm_math::suggest_l_zero_for_max_reserve(amount, time_remaining, price)?;
+            let new_l_zero = market.l_zero_fixed() + l_zero_increment;
             let new_l_eff = pm_math::l_effective(new_l_zero, time_remaining)?;
             let (x, y) = pm_math::reserves_from_price(price, new_l_eff)?;
+
+            new_shares = amount_fixed;
+            let new_total = total_shares + new_shares;
 
             market.set_l_zero_fixed(new_l_zero);
             market.set_reserve_yes_fixed(x);

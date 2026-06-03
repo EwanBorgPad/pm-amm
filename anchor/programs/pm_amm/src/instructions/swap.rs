@@ -121,6 +121,55 @@ pub fn handler(
             _ => {}
         }
 
+        // SOLVENCY GUARD (fix #1): the swap-AMM mints YES/NO as liabilities, so
+        // a trade can mint more winning tokens than the vault backs. Require the
+        // vault to still cover the worst-case redemption AFTER this trade —
+        // max over YES/NO of (circulating supply + remaining reserve), since
+        // every reserve token is eventually distributed to LPs and the winning
+        // side redeems 1 USDC each. Reject otherwise (keeps `claim_winnings`
+        // always solvent: no winner can ever be locked out).
+        {
+            let ys = ctx.accounts.yes_mint.supply;
+            let ns = ctx.accounts.no_mint.supply;
+            let v = ctx.accounts.vault.amount;
+            let rx = result.x_new.max(I80F48::ZERO).to_num::<u64>();
+            let ry = result.y_new.max(I80F48::ZERO).to_num::<u64>();
+            let (post_ys, post_ns, post_vault) = match direction {
+                SwapDirection::UsdcToYes => (
+                    ys.saturating_add(output_u64),
+                    ns,
+                    v.saturating_add(amount_in),
+                ),
+                SwapDirection::UsdcToNo => (
+                    ys,
+                    ns.saturating_add(output_u64),
+                    v.saturating_add(amount_in),
+                ),
+                SwapDirection::YesToUsdc => (
+                    ys.saturating_sub(amount_in),
+                    ns,
+                    v.saturating_sub(output_u64),
+                ),
+                SwapDirection::NoToUsdc => (
+                    ys,
+                    ns.saturating_sub(amount_in),
+                    v.saturating_sub(output_u64),
+                ),
+                SwapDirection::YesToNo => (
+                    ys.saturating_sub(amount_in),
+                    ns.saturating_add(output_u64),
+                    v,
+                ),
+                SwapDirection::NoToYes => (
+                    ys.saturating_add(output_u64),
+                    ns.saturating_sub(amount_in),
+                    v,
+                ),
+            };
+            let obligation = post_ys.saturating_add(rx).max(post_ns.saturating_add(ry));
+            require!(post_vault >= obligation, PmAmmError::InsufficientVault);
+        }
+
         market_id_bytes = market.market_id.to_le_bytes();
         bump = market.bump;
         market.set_reserve_yes_fixed(result.x_new);
