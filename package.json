@@ -6,7 +6,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "cd anchor && anchor build --no-idl --ignore-keys && anchor idl build -o target/idl/pm_amm.json",
+    "build": "cd anchor && anchor build --no-idl --ignore-keys && anchor idl build -o target/idl/pm_amm.json -t target/types/pm_amm.ts",
     "build:sdk": "pnpm --filter @pm-amm/sdk build",
     "sync:idl": "node scripts/sync-idl.mjs",
     "test": "cd anchor && anchor test",

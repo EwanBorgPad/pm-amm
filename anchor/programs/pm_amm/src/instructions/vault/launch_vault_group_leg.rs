@@ -132,8 +132,14 @@ pub fn handler(ctx: Context<LaunchVaultGroupLeg>, leg_index: u8, market_id: u64)
     // no single leg can exceed 9900 if leg_count ≥ 2 AND every leg ≥ 100 bps.
     let clamped_bps = leg_bps.min(9900);
 
+    // The leg market only needs to be unexpired here — NOT `> now + 300`.
+    // Re-applying the 300s MIN_DURATION headroom per leg against a moving `now`
+    // let the group enter the irreversible launched state (refund disabled)
+    // while a leg launched late became un-launchable → permanent fund lock,
+    // guaranteed for min-duration vaults (audit #5). MIN_DURATION is already
+    // enforced at vault init; a late leg just resolves sooner via the cascade.
     let market_end_ts = vault.market_end_ts;
-    require!(market_end_ts > now + 300, PmAmmError::InvalidDuration);
+    require!(market_end_ts > now, PmAmmError::MarketExpired);
 
     // ----- Inline equivalent of initialize_market::handler -----
     let market = &mut ctx.accounts.market;

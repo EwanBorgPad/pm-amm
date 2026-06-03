@@ -1,28 +1,31 @@
-//! Binary vault claim — v2 (Sprint 24): mint outcome tokens to the committer.
+//! Binary vault claim — option C (committers = LPs), audit #6.
 //!
-//! Each committer receives YES tokens for their YES commit and NO tokens
-//! for their NO commit, 1:1 with their USDC commit. The USDC they put in
-//! is transferred from the commitment vault to the market vault as
-//! collateral backing the freshly-minted supply.
+//! The Paradigm pm-AMM is an LP-vs-traders AMM: there is no self-funded
+//! "bettor" whose losing stake could strand. A commitment vault is just a way
+//! to CROWD-BOOTSTRAP that AMM, so committers are LPs. `launch_vault_market`
+//! deposits the whole committed pot as liquidity (fully collateralized via the
+//! max-reserve calibration, fix #1) and sets `total_lp_shares = total commit`.
+//! This instruction hands each committer their pro-rata slice as a real
+//! `LpPosition` (1 USDC committed = 1 LP share).
 //!
-//! Post-resolution flow:
-//!   - Winning side committers call `claim_winnings` on the market: each
-//!     winning token redeems for 1 USDC (the backing transferred at claim).
-//!   - Losing side tokens are worthless.
+//! Checkpoints are 0 (the launch baseline), so a committer earns their share of
+//! all `dC_t` residuals accrued since launch — their capital was in the pool
+//! from the start. The accumulator is normalized by `total_lp_shares` (set to
+//! the full committed total at launch), so unclaimed slices stay correctly
+//! accounted until their owner materializes this position.
 //!
-//! Solvency invariant maintained:
-//!   market_vault.usdc >= max(yes_supply, no_supply)
-//! After all claims: market_vault.usdc = total_commits = yes_total + no_total
-//! and max(yes_supply, no_supply) ≤ yes_total + no_total ✓
+//! After claiming, a committer is a normal LP: `claim_lp_residuals`,
+//! `withdraw_liquidity` (YES+NO out), `redeem_pair`, and post-resolution
+//! `claim_winnings` on whatever they hold. Nothing is stranded; the winning
+//! side is always fully backed (fix #1).
 //!
-//! v1 returned USDC 1:1 with no outcome exposure — that path is gone.
+//! Pre-launch the recovery path is `refund_commit`; once launched it's this.
 
 use anchor_lang::prelude::*;
-use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{self, transfer, Mint, MintTo, Token, TokenAccount, Transfer};
+use fixed::types::I80F48;
 
 use crate::errors::PmAmmError;
-use crate::state::{CommitPosition, CommitmentVault, Market};
+use crate::state::{CommitPosition, CommitmentVault, LpPosition, Market};
 
 #[derive(Accounts)]
 pub struct ClaimCommitter<'info> {
@@ -35,50 +38,9 @@ pub struct ClaimCommitter<'info> {
     )]
     pub vault: Box<Account<'info, CommitmentVault>>,
 
-    /// PDA-owned vault collateral ATA — source of the USDC backing transfer.
-    #[account(
-        mut,
-        seeds = [crate::instructions::vault::VAULT_COLLATERAL_SEED, vault.key().as_ref()],
-        bump,
-    )]
-    pub vault_collateral: Box<Account<'info, TokenAccount>>,
-
-    pub collateral_mint: Box<Account<'info, Mint>>,
-
     /// The launched binary market — must match `vault.market`.
-    #[account(
-        mut,
-        constraint = market.key() == vault.market @ PmAmmError::InvalidMarket,
-    )]
+    #[account(constraint = market.key() == vault.market @ PmAmmError::InvalidMarket)]
     pub market: Box<Account<'info, Market>>,
-
-    /// Market's USDC vault — destination of the backing transfer.
-    #[account(mut, constraint = market_vault.key() == market.vault @ PmAmmError::InvalidVault)]
-    pub market_vault: Box<Account<'info, TokenAccount>>,
-
-    #[account(mut, constraint = yes_mint.key() == market.yes_mint @ PmAmmError::InvalidWinningMint)]
-    pub yes_mint: Box<Account<'info, Mint>>,
-
-    #[account(mut, constraint = no_mint.key() == market.no_mint @ PmAmmError::InvalidWinningMint)]
-    pub no_mint: Box<Account<'info, Mint>>,
-
-    /// User's YES ATA — init if missing.
-    #[account(
-        init_if_needed,
-        payer = signer,
-        associated_token::mint = yes_mint,
-        associated_token::authority = signer,
-    )]
-    pub user_yes: Box<Account<'info, TokenAccount>>,
-
-    /// User's NO ATA — init if missing.
-    #[account(
-        init_if_needed,
-        payer = signer,
-        associated_token::mint = no_mint,
-        associated_token::authority = signer,
-    )]
-    pub user_no: Box<Account<'info, TokenAccount>>,
 
     #[account(
         mut,
@@ -89,8 +51,18 @@ pub struct ClaimCommitter<'info> {
     )]
     pub commit_position: Box<Account<'info, CommitPosition>>,
 
-    pub associated_token_program: Program<'info, AssociatedToken>,
-    pub token_program: Program<'info, Token>,
+    /// The committer's LP position — created here with their pro-rata shares.
+    /// `init` (not `init_if_needed`): a committer who already opened a separate
+    /// LpPosition on this market must use `deposit_liquidity` instead.
+    #[account(
+        init,
+        payer = signer,
+        space = LpPosition::LEN,
+        seeds = [LpPosition::SEED, market.key().as_ref(), signer.key().as_ref()],
+        bump,
+    )]
+    pub lp_position: Box<Account<'info, LpPosition>>,
+
     pub system_program: Program<'info, System>,
 }
 
@@ -98,80 +70,33 @@ pub fn handler(ctx: Context<ClaimCommitter>) -> Result<()> {
     let vault = &ctx.accounts.vault;
     require!(vault.launched, PmAmmError::VaultNotLaunched);
 
+    let market = &ctx.accounts.market;
+    // The market was bootstrapped with liquidity at launch.
+    require!(
+        market.total_lp_shares > 0,
+        PmAmmError::InsufficientLiquidity
+    );
+
     let position = &mut ctx.accounts.commit_position;
     require!(!position.claimed, PmAmmError::AlreadyClaimed);
-    let yes_amount = position.yes_amount;
-    let no_amount = position.no_amount;
     let total = position.total();
     require!(total > 0, PmAmmError::NoCommitFunds);
 
-    // Phase 1: transfer USDC from commitment_vault to market_vault. Signed
-    // by the commitment vault PDA.
-    let vault_id_bytes = vault.vault_id.to_le_bytes();
-    let vault_bump = vault.bump;
-    let vault_seeds: &[&[&[u8]]] = &[&[
-        CommitmentVault::SEED,
-        vault_id_bytes.as_ref(),
-        &[vault_bump],
-    ]];
-    let tp = ctx.accounts.token_program.key();
-
-    transfer(
-        CpiContext::new_with_signer(
-            tp,
-            Transfer {
-                from: ctx.accounts.vault_collateral.to_account_info(),
-                to: ctx.accounts.market_vault.to_account_info(),
-                authority: ctx.accounts.vault.to_account_info(),
-            },
-            vault_seeds,
-        ),
-        total,
-    )?;
-
-    // Phase 2: mint YES / NO tokens to the user. Signed by the market PDA.
-    let market = &ctx.accounts.market;
-    let market_id_bytes = market.market_id.to_le_bytes();
-    let market_bump = market.bump;
-    let market_seeds: &[&[&[u8]]] = &[&[Market::SEED, market_id_bytes.as_ref(), &[market_bump]]];
-    let market_info = ctx.accounts.market.to_account_info();
-
-    if yes_amount > 0 {
-        token::mint_to(
-            CpiContext::new_with_signer(
-                tp,
-                MintTo {
-                    mint: ctx.accounts.yes_mint.to_account_info(),
-                    to: ctx.accounts.user_yes.to_account_info(),
-                    authority: market_info.clone(),
-                },
-                market_seeds,
-            ),
-            yes_amount,
-        )?;
-    }
-
-    if no_amount > 0 {
-        token::mint_to(
-            CpiContext::new_with_signer(
-                tp,
-                MintTo {
-                    mint: ctx.accounts.no_mint.to_account_info(),
-                    to: ctx.accounts.user_no.to_account_info(),
-                    authority: market_info,
-                },
-                market_seeds,
-            ),
-            no_amount,
-        )?;
-    }
+    // 1 USDC committed == 1 LP share (launch set total_lp_shares = total commit).
+    // Checkpoint 0 = launch baseline → earns dC_t residuals from launch onward.
+    let lp = &mut ctx.accounts.lp_position;
+    lp.owner = ctx.accounts.signer.key();
+    lp.market = market.key();
+    lp.bump = ctx.bumps.lp_position;
+    lp.shares = I80F48::from_num(total).to_bits() as u128;
+    lp.collateral_deposited = total;
+    lp.yes_per_share_checkpoint = 0;
+    lp.no_per_share_checkpoint = 0;
 
     position.claimed = true;
     msg!(
-        "Binary claim {}: minted {} YES + {} NO, transferred {} USDC to market_vault",
+        "Vault LP claim {}: {} LP shares (1 USDC = 1 share)",
         position.owner,
-        yes_amount,
-        no_amount,
         total
     );
     Ok(())

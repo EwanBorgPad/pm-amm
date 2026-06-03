@@ -58,12 +58,17 @@ pub fn handler(ctx: Context<RefundCommit>) -> Result<()> {
     let vault = &mut ctx.accounts.vault;
     require!(!vault.launched, PmAmmError::VaultAlreadyLaunched);
     require!(now >= vault.commit_end_ts, PmAmmError::CommitPhaseNotEnded);
-    // Refund is only valid if the launch can no longer happen — either
-    // already past commit_end_ts AND total < min_total (launch was rejected)
-    // OR the launch hasn't been triggered after a grace period. We use the
-    // simpler invariant: not launched + past commit_end_ts is enough since
-    // no one has launched it yet — the refund opens immediately.
-    // If a launch HAS happened, the path is claim_committer instead.
+    // Refund ONLY when the launch can no longer succeed (audit #4). Otherwise a
+    // griefer could refund a healthy (>= min_total) vault back below the
+    // threshold and permanently block a launch that should have happened.
+    // `launch_vault_market` needs `total >= min_total` AND
+    // `market_end_ts > now + 300` (the market's MIN_DURATION headroom), so the
+    // launch is impossible iff the vault is under-funded OR the launch window
+    // has closed. Until then, the only path for a fundable vault is to launch.
+    require!(
+        vault.total() < vault.min_total || now.saturating_add(300) >= vault.market_end_ts,
+        PmAmmError::RefundNotAvailable
+    );
 
     let position = &mut ctx.accounts.commit_position;
     require!(!position.claimed, PmAmmError::AlreadyClaimed);
