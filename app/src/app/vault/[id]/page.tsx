@@ -62,7 +62,7 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
     setBusy(true);
     try {
       await client.send.claimCommitter(new PublicKey(vault.publicKey), new PublicKey(vault.market));
-      toast.success("Minted YES + NO tokens to your wallet");
+      toast.success("Claimed your LP position — you're now a liquidity provider of this market");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error(msg.slice(0, 200));
@@ -237,15 +237,16 @@ export default function VaultPage({ params }: { params: Promise<{ id: string }> 
                 {vault.isClaimOpen && (
                   <>
                     <p className="text-[11px] text-muted font-mono uppercase">
-                      Claim outcome tokens
+                      Claim your LP position
                     </p>
                     <p className="text-[11px] text-muted">
-                      Mint your <strong className="text-text-hi">YES + NO tokens</strong> 1:1 with
-                      your commits. Each winning-side token redeems for 1 USDC via the market post-
-                      resolution; losing-side tokens become worthless.
+                      The committed pot was deposited as the market&apos;s liquidity, so you become
+                      a <strong className="text-text-hi">liquidity provider</strong> (1 USDC
+                      committed = 1 LP share). Earn the dC_t yield, then withdraw or claim winnings
+                      from the market like any LP.
                     </p>
                     <Button onClick={handleClaim} disabled={busy || !publicKey} className="w-full">
-                      {busy ? "…" : "Claim outcome tokens"}
+                      {busy ? "…" : "Claim LP position"}
                     </Button>
                   </>
                 )}

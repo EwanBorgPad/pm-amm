@@ -14,6 +14,7 @@ import {
   deriveVaultPda,
   deriveVaultCollateralPda,
   deriveCommitPositionPda,
+  deriveLpPosition,
   deriveMarketPda,
   deriveYesMint,
   deriveNoMint,
@@ -92,6 +93,7 @@ export async function buildLaunchVaultMarket(
       yesMint,
       noMint,
       marketVault: deriveMarketVault(ctx.programId, market),
+      vaultCollateral: deriveVaultCollateralPda(ctx.programId, p.vault),
       yesMetadata: deriveMetadataPda(yesMint, ctx.metaplexProgramId),
       noMetadata: deriveMetadataPda(noMint, ctx.metaplexProgramId),
       tokenMetadataProgram: ctx.metaplexProgramId,
@@ -106,24 +108,17 @@ export async function buildClaimCommitter(
   ctx: IxContext,
   p: { signer: PublicKey; vault: PublicKey; market: PublicKey },
 ): Promise<TransactionInstruction> {
-  const yesMint = deriveYesMint(ctx.programId, p.market);
-  const noMint = deriveNoMint(ctx.programId, p.market);
+  // Option C (audit #6): claim materializes the committer's LP position
+  // (1 USDC committed = 1 LP share). No YES/NO mint or USDC move here — the
+  // pot was deposited as liquidity at launch.
   return ctx.program.methods
     .claimCommitter()
     .accountsPartial({
       signer: p.signer,
       vault: p.vault,
-      vaultCollateral: deriveVaultCollateralPda(ctx.programId, p.vault),
-      collateralMint: ctx.collateralMint,
       market: p.market,
-      marketVault: deriveMarketVault(ctx.programId, p.market),
-      yesMint,
-      noMint,
-      userYes: await getAssociatedTokenAddress(yesMint, p.signer),
-      userNo: await getAssociatedTokenAddress(noMint, p.signer),
       commitPosition: deriveCommitPositionPda(ctx.programId, p.vault, p.signer),
-      associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-      tokenProgram: TOKEN_PROGRAM_ID,
+      lpPosition: deriveLpPosition(ctx.programId, p.market, p.signer),
       systemProgram: SystemProgram.programId,
     })
     .instruction();
