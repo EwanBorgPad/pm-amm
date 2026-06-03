@@ -58,11 +58,27 @@ pub fn handler(ctx: Context<RefundCommitGroup>) -> Result<()> {
     let bump = ctx.accounts.vault.bump;
 
     let vault = &mut ctx.accounts.vault;
-    require!(
-        !vault.group_market_initialized,
-        PmAmmError::VaultAlreadyLaunched
-    );
     require!(now >= vault.commit_end_ts, PmAmmError::CommitPhaseNotEnded);
+    // Refund ONLY when the launch can no longer complete (audit #4 + #5):
+    //  - pre-launch failed: the group never initialized AND it is unlaunchable
+    //    — under min_total, a leg below the 100-bps floor, or the launch window
+    //    closed. This blocks the grief where a refund drags a healthy vault (or
+    //    a leg) below threshold to kill a legitimate launch.
+    //  - post-launch incomplete: the group initialized but not every leg got
+    //    launched by market_end_ts (a stuck/abandoned multi-step launch).
+    //    Committers then recover the USDC still held in vault_collateral for
+    //    their unclaimed legs (claimed legs already moved their USDC out).
+    let pre_launch_failed = !vault.group_market_initialized
+        && (vault.total() < vault.min_total
+            || !vault.all_legs_above_min_share()
+            || now.saturating_add(300) >= vault.market_end_ts);
+    let post_launch_incomplete = vault.group_market_initialized
+        && vault.legs_launched < vault.leg_count
+        && now >= vault.market_end_ts;
+    require!(
+        pre_launch_failed || post_launch_incomplete,
+        PmAmmError::RefundNotAvailable
+    );
 
     let position = &mut ctx.accounts.commit_position;
     require!(!position.claimed, PmAmmError::AlreadyClaimed);
