@@ -109,9 +109,14 @@ Source of truth for ALL math. Always cross-check before implementing.
 - `E[LVR_t] = V_0 / (2T)` — constant expected LVR (section 8)
 - `E[W_T] = W_0 / 2` — terminal wealth (section 8)
 - Conservation: everything goes to LPs (YES+NO tokens) or arbitrageurs (LVR)
-- Vault solvency: `vault.usdc ≥ max(yes_supply, no_supply)` at all `t`, by construction of the
-  curve + dC_t flow. Winners can always be paid 1 USDC per winning token. The `.min(vault.amount)`
-  in `claim_winnings` is defensive coding for a case the math forbids — it should never fire.
+- Vault solvency: `vault.usdc ≥ max(yes_supply + reserve_yes, no_supply + reserve_no)` at all `t`.
+  This holds ONLY because (fix #1) the first deposit calibrates `L_0` so `max(x, y) = deposit`
+  (`suggest_l_zero_for_max_reserve`, not `V(P)`), and `swap` hard-reverts any trade that would
+  break it. The paper's `V(P)` equals `max(x, y)` *only at P=0.5*, so the older `V(P)` calibration
+  left non-0.5 / multi-outcome markets under-collateralized. With the fix, every reserve token is
+  eventually distributed to LPs and the winning side always redeems 1 USDC each. Trade-off:
+  skewed markets need proportionally more backing (less depth per USDC) — that is the inherent,
+  correct cost of solvency. `claim_winnings` can never be locked out by an empty vault.
 - NEVER deviate from the paper's math spec without explicit approval
 
 ## Architecture (Sprint 21 — multi-outcome + custom seed)

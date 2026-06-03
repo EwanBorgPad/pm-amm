@@ -649,6 +649,50 @@ pub fn suggest_l_zero_at_price(
     Ok(budget / (phi_u * sqrt_t))
 }
 
+/// Calibrate L_0 so the LARGER reserve at `target_price` equals the budget.
+///
+/// SOLVENCY (fix #1): a prediction market pays 1 USDC per winning token, so the
+/// vault must cover the *bigger* side's full token count = `max(x, y)`. The
+/// paper's `V(P)` (pool value) only equals `max(x, y)` at P=0.5; for any other
+/// seed it is strictly smaller, which left the winning side under-collateralized.
+/// Calibrating against `max(x, y)` instead funds the worst-case redemption, so
+/// `vault ≥ max(yes_supply, no_supply)` holds by construction at deposit.
+/// At P=0.5 this is identical to `suggest_l_zero_for_budget` (x = y = V).
+///
+/// `x = L_eff·(u·P + φ(u) − u)`, `y = L_eff·(u·P + φ(u))` are linear in L_eff,
+/// so `L_0 = budget / (max(c_x, c_y) · sqrt(T))` with `c_y = u·P + φ(u)`,
+/// `c_x = c_y − u`. The function is linear in `budget`, so the same call also
+/// yields the L_0 *increment* for a follow-up deposit of `budget` at `price`.
+pub fn suggest_l_zero_for_max_reserve(
+    budget_usdc: u64,
+    duration_secs: i64,
+    target_price: I80F48,
+) -> Result<I80F48> {
+    if budget_usdc == 0 {
+        return err!(PmAmmError::InvalidBudget);
+    }
+    if duration_secs <= 0 {
+        return err!(PmAmmError::InvalidDuration);
+    }
+    if target_price < PRICE_LOWER_BOUND || target_price > PRICE_UPPER_BOUND {
+        return err!(PmAmmError::InvalidPrice);
+    }
+
+    let budget = I80F48::from_num(budget_usdc);
+    let sqrt_t = sqrt_fixed(I80F48::from_num(duration_secs))?;
+    let u = capital_phi_inv_fixed(target_price)?;
+    let phi_u = phi_fixed(u)?;
+
+    let c_y = u * target_price + phi_u; // coefficient of y (NO reserve)
+    let c_x = c_y - u; // coefficient of x (YES reserve)
+    let c_max = if c_x > c_y { c_x } else { c_y };
+
+    if c_max <= ZERO {
+        return err!(PmAmmError::MathOverflow);
+    }
+    Ok(budget / (c_max * sqrt_t))
+}
+
 // ============================================================================
 // Tests — cross-validated against oracle/test_vectors.json (scipy)
 // ============================================================================
@@ -1338,6 +1382,40 @@ mod tests {
         assert!(suggest_l_zero_for_budget(0, 604800).is_err());
         assert!(suggest_l_zero_for_budget(1000, 0).is_err());
         assert!(suggest_l_zero_for_budget(1000, -1).is_err());
+    }
+
+    #[test]
+    fn test_suggest_l_zero_for_max_reserve_solvency() {
+        // SOLVENCY (fix #1): calibrating at max(x,y)=budget must make the larger
+        // reserve equal the deposit at EVERY seed price (so the vault can pay the
+        // winning side 1:1). Verified across the whole price range.
+        let budget: u64 = 1_000_000;
+        let dur = 604_800; // 7 days
+        for p_bps in [100, 500, 1000, 2500, 5000, 7500, 9000, 9500, 9900] {
+            let p = f(p_bps as f64 / 10000.0);
+            let l0 = suggest_l_zero_for_max_reserve(budget, dur, p).unwrap();
+            let l_eff = l_effective(l0, dur).unwrap();
+            let (x, y) = reserves_from_price(p, l_eff).unwrap();
+            let max_reserve: f64 = if x > y { x.to_num() } else { y.to_num() };
+            // max(x,y) must equal the budget (within fixed-point dust), and must
+            // never EXCEED it (that would under-fund the vault).
+            let rel_err = (max_reserve - budget as f64).abs() / budget as f64;
+            assert!(
+                rel_err < 1e-4 && max_reserve <= budget as f64 + 1.0,
+                "max(x,y) at P={p_bps}bps = {max_reserve:.2}, budget={budget} (rel_err={rel_err:.2e})"
+            );
+        }
+        // At P=0.5 it must coincide with the legacy V-based calibration (x=y=V),
+        // modulo fixed-point dust in Φ⁻¹(0.5)≈0 vs the literal φ(0) constant.
+        let l0_max: f64 = suggest_l_zero_for_max_reserve(budget, dur, HALF)
+            .unwrap()
+            .to_num();
+        let l0_v: f64 = suggest_l_zero_for_budget(budget, dur).unwrap().to_num();
+        let rel: f64 = (l0_max - l0_v).abs() / l0_v;
+        assert!(
+            rel < 1e-6,
+            "P=0.5 calibration mismatch: max={l0_max}, v={l0_v}"
+        );
     }
 
     // ================================================================
