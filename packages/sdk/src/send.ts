@@ -8,7 +8,7 @@
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import type { BN } from "@anchor-lang/core";
 import type { PmAmmClient } from "./client";
-import { CU } from "./constants";
+import { CU, PROTOCOL_DAO } from "./constants";
 import { randomU48 } from "./encoding";
 import { ensureAtaIx, computeBudgetIx } from "./util/ata";
 import type {
@@ -73,17 +73,42 @@ export function makeSend(client: PmAmmClient) {
       minOutputMicro: number | BN,
     ) {
       const signer = client.walletPubkey();
+      const m = await client.fetchMarket(market);
+      if (!m) throw new Error("swap: market not found");
+      const authority = m.authority as PublicKey;
       const pre = await ataPreIxs([
         client.yesMint(market),
         client.noMint(market),
         client.collateralMint,
       ]);
+      // Ensure the fee-recipient USDC ATAs exist (2% fee → 50% DAO, 50%
+      // creator). Idempotent; payer is the swapper. The DAO key is off-curve.
+      const { ix: daoAta } = await ensureAtaIx(
+        client.connection,
+        signer,
+        PROTOCOL_DAO,
+        client.collateralMint,
+        true,
+      );
+      if (daoAta) pre.push(daoAta);
+      // Creator ATA only when the swapper is NOT the creator (otherwise the
+      // creator keeps their share and `creatorUsdc` is passed as null).
+      if (!authority.equals(signer)) {
+        const { ix: creatorAta } = await ensureAtaIx(
+          client.connection,
+          signer,
+          authority,
+          client.collateralMint,
+        );
+        if (creatorAta) pre.push(creatorAta);
+      }
       const ix = await client.ix.swap({
         signer,
         market,
         direction,
         amountIn: amountInMicro,
         minOutput: minOutputMicro,
+        creatorAuthority: authority,
       });
       return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },

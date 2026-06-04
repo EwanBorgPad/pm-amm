@@ -1,7 +1,7 @@
 import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PmAmm } from "../target/types/pm_amm";
-import { PublicKey, SystemProgram, ComputeBudgetProgram } from "@solana/web3.js";
+import { PublicKey, SystemProgram, ComputeBudgetProgram, Keypair } from "@solana/web3.js";
 import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
 import { assert } from "chai";
 
@@ -13,6 +13,7 @@ const LP_SEED = Buffer.from("lp");
 /** Metaplex Token Metadata Program — required by initialize_market for the
  *  YES/NO mint metadata CPI. */
 const METAPLEX_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const PROTOCOL_DAO = new PublicKey("HKLjYENZaFghSp2TM5VJad32wVu7d2XCMJZqKGTQ3ZeL");
 
 /** Metaplex metadata PDA: [b"metadata", program, mint]. */
 function deriveMetadataPda(mint: PublicKey): PublicKey {
@@ -62,12 +63,24 @@ describe("pm_amm", () => {
   let userUsdc: PublicKey;
   let userYes: PublicKey;
   let userNo: PublicKey;
+  let daoUsdc: PublicKey; // swap-fee recipient (owned by PROTOCOL_DAO)
 
   before(async () => {
     collateralMint = await createMint(provider.connection, payer, authority, null, 6);
     // Create user USDC account + fund with 10000 USDC
     userUsdc = await createAccount(provider.connection, payer, collateralMint, authority);
     await mintTo(provider.connection, payer, collateralMint, userUsdc, payer, 10_000_000_000); // 10000 USDC (6 decimals)
+    // Swap-fee recipient: a USDC account owned by the protocol DAO. The market
+    // creator's share goes to `userUsdc` (owned by `authority` = the creator).
+    // PROTOCOL_DAO is off-curve → use a plain keypair'd token account (not an
+    // ATA, whose derivation rejects off-curve owners).
+    daoUsdc = await createAccount(
+      provider.connection,
+      payer,
+      collateralMint,
+      PROTOCOL_DAO,
+      Keypair.generate(),
+    );
   });
 
   // ================================================================
@@ -204,6 +217,8 @@ describe("pm_amm", () => {
         userCollateral: userUsdc,
         userYes,
         userNo,
+        daoUsdc,
+        creatorUsdc: null, // swapper IS the creator → keeps their fee share
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
@@ -216,6 +231,62 @@ describe("pm_amm", () => {
     // Market reserves should have changed
     const market = await program.account.market.fetch(pdas.marketPda);
     assert.ok(!market.reserveYes.eq(new anchor.BN(0)));
+  });
+
+  // ================================================================
+  // Swap fee: a DISTINCT trader (not the creator) pays 2% → 50% DAO + 50%
+  // creator. Exercises the `creator_present` path (the other tests use the
+  // swapper-is-creator path with creatorUsdc = null).
+  // ================================================================
+  it("swap fee — distinct trader pays 2% split 50/50 DAO/creator", async () => {
+    const trader = Keypair.generate();
+    const sig = await provider.connection.requestAirdrop(trader.publicKey, 2_000_000_000);
+    await provider.connection.confirmTransaction(sig, "confirmed");
+    const traderUsdc = await createAccount(
+      provider.connection,
+      payer,
+      collateralMint,
+      trader.publicKey,
+    );
+    await mintTo(provider.connection, payer, collateralMint, traderUsdc, payer, 1_000_000_000);
+    const traderYes = await createAccount(provider.connection, payer, pdas.yesMint, trader.publicKey);
+    const traderNo = await createAccount(provider.connection, payer, pdas.noMint, trader.publicKey);
+
+    // creator_usdc = userUsdc (owned by `authority` = the market creator),
+    // distinct from the trader's account → no duplicate-mutable.
+    const daoBefore = Number((await getAccount(provider.connection, daoUsdc)).amount);
+    const creatorBefore = Number((await getAccount(provider.connection, userUsdc)).amount);
+
+    const amountIn = 100_000_000; // 100 USDC → fee = 2 USDC (1 DAO + 1 creator)
+    await program.methods
+      .swap({ usdcToYes: {} } as any, new anchor.BN(amountIn), new anchor.BN(0))
+      .accountsPartial({
+        signer: trader.publicKey,
+        market: pdas.marketPda,
+        collateralMint,
+        yesMint: pdas.yesMint,
+        noMint: pdas.noMint,
+        vault: pdas.vault,
+        userCollateral: traderUsdc,
+        userYes: traderYes,
+        userNo: traderNo,
+        daoUsdc,
+        creatorUsdc: userUsdc,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
+      .signers([trader])
+      .rpc();
+
+    const daoAfter = Number((await getAccount(provider.connection, daoUsdc)).amount);
+    const creatorAfter = Number((await getAccount(provider.connection, userUsdc)).amount);
+    const fee = Math.floor((amountIn * 200) / 10_000); // 2%
+    assert.equal(daoAfter - daoBefore, Math.floor(fee / 2), "DAO gets 50% of the fee");
+    assert.equal(creatorAfter - creatorBefore, fee - Math.floor(fee / 2), "creator gets 50%");
+    assert.ok(
+      Number((await getAccount(provider.connection, traderYes)).amount) > 0,
+      "trader received YES",
+    );
   });
 
   // ================================================================
@@ -239,6 +310,8 @@ describe("pm_amm", () => {
         userCollateral: userUsdc,
         userYes,
         userNo,
+        daoUsdc,
+        creatorUsdc: null, // swapper IS the creator → keeps their fee share
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
@@ -281,6 +354,8 @@ describe("pm_amm", () => {
         userCollateral: userUsdc,
         userYes,
         userNo,
+        daoUsdc,
+        creatorUsdc: null, // swapper IS the creator → keeps their fee share
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
@@ -494,6 +569,8 @@ describe("pm_amm", () => {
           userCollateral: userUsdc,
           userYes,
           userNo,
+          daoUsdc,
+          creatorUsdc: null, // swapper IS the creator → keeps their fee share
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
@@ -620,6 +697,8 @@ describe("pm_amm", () => {
         userCollateral: userUsdc,
         userYes: shortUserYes,
         userNo: shortUserNo,
+        daoUsdc,
+        creatorUsdc: null, // swapper IS the creator → keeps their fee share
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])

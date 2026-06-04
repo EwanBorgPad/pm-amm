@@ -1,4 +1,14 @@
-//! Swap between USDC, YES, and NO tokens.
+//! Swap between USDC, YES, and NO tokens — with a protocol trading fee.
+//!
+//! A 2% fee (`SWAP_FEE_BPS`) is taken on the USDC leg of every swap and split
+//! 50/50 between the protocol DAO (`PROTOCOL_DAO`) and the market creator
+//! (`market.authority`):
+//!   - USDC-in  (UsdcToYes/UsdcToNo): fee is skimmed off the input; only the net
+//!     trades on the curve and backs the vault.
+//!   - USDC-out (YesToUsdc/NoToUsdc): fee is skimmed off the curve's USDC output;
+//!     the vault still pays the full gross out (user net + fee), so solvency is
+//!     unchanged.
+//!   - YES<->NO: no USDC leg, no fee.
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Burn, Mint, MintTo, Token, TokenAccount, Transfer};
@@ -8,6 +18,18 @@ use crate::accrual;
 use crate::errors::PmAmmError;
 use crate::pm_math::{self, SwapSide};
 use crate::state::Market;
+
+/// Protocol trading fee in basis points (2%). Split 50/50 DAO / creator.
+pub const SWAP_FEE_BPS: u64 = 200;
+
+/// Protocol DAO (Combinator Predict) — receives 50% of the swap fee.
+pub const PROTOCOL_DAO: Pubkey = pubkey!("HKLjYENZaFghSp2TM5VJad32wVu7d2XCMJZqKGTQ3ZeL");
+
+/// `amount * SWAP_FEE_BPS / 10_000` in u128 to avoid overflow.
+#[inline(always)]
+fn fee_of(amount: u64) -> u64 {
+    ((amount as u128) * (SWAP_FEE_BPS as u128) / 10_000u128) as u64
+}
 
 /// Direction of a swap. Six combinations covering all USDC/YES/NO pairs.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
@@ -36,6 +58,12 @@ impl SwapDirection {
             Self::YesToNo => (SwapSide::Yes, SwapSide::No),
             Self::NoToYes => (SwapSide::No, SwapSide::Yes),
         }
+    }
+    fn is_usdc_in(&self) -> bool {
+        matches!(self, Self::UsdcToYes | Self::UsdcToNo)
+    }
+    fn is_usdc_out(&self) -> bool {
+        matches!(self, Self::YesToUsdc | Self::NoToUsdc)
     }
 }
 
@@ -68,10 +96,24 @@ pub struct Swap<'info> {
     #[account(mut, constraint = user_no.mint == market.no_mint, constraint = user_no.owner == signer.key())]
     pub user_no: Box<Account<'info, TokenAccount>>,
 
+    /// Protocol DAO's USDC ATA — receives 50% of the swap fee.
+    #[account(
+        mut,
+        constraint = dao_usdc.mint == market.collateral_mint @ PmAmmError::InvalidVault,
+        constraint = dao_usdc.owner == PROTOCOL_DAO @ PmAmmError::Unauthorized,
+    )]
+    pub dao_usdc: Box<Account<'info, TokenAccount>>,
+    /// Market creator's USDC ATA — receives 50% of the swap fee. OPTIONAL: pass
+    /// `None` when the swapper IS the creator (they keep their fee share), which
+    /// also avoids a duplicate-mutable-account error with `user_collateral`.
+    /// Validated in the handler when present (owner == market.authority).
+    #[account(mut)]
+    pub creator_usdc: Option<Box<Account<'info, TokenAccount>>>,
+
     pub token_program: Program<'info, Token>,
 }
 
-/// Swap between USDC, YES, and NO tokens (6 directions).
+/// Swap between USDC, YES, and NO tokens (6 directions), with a 2% USDC-leg fee.
 pub fn handler(
     ctx: Context<Swap>,
     direction: SwapDirection,
@@ -82,8 +124,18 @@ pub fn handler(
     let now = clock.unix_timestamp;
     require!(amount_in > 0, PmAmmError::InvalidBudget);
 
+    // Fee on the USDC input (USDC-in directions). The net amount trades + backs.
+    let fee_in = if direction.is_usdc_in() {
+        fee_of(amount_in)
+    } else {
+        0
+    };
+    let swap_in = amount_in.saturating_sub(fee_in); // net USDC traded / tokens burned
+    require!(swap_in > 0, PmAmmError::InvalidBudget);
+
     // --- Phase 1: compute + update market ---
     let output_u64: u64;
+    let fee_out: u64;
     let market_id_bytes: [u8; 8];
     let bump: u8;
     {
@@ -101,33 +153,35 @@ pub fn handler(
             market.reserve_yes_fixed(),
             market.reserve_no_fixed(),
             l_eff,
-            I80F48::from_num(amount_in),
+            I80F48::from_num(swap_in),
             side_in,
             side_out,
         )?;
 
         output_u64 = result.output.max(I80F48::ZERO).to_num::<u64>();
         require!(output_u64 > 0, PmAmmError::InsufficientOutput);
-        require!(output_u64 >= min_output, PmAmmError::SlippageExceeded);
 
-        // Vault solvency check for USDC-out swaps
-        match direction {
-            SwapDirection::YesToUsdc | SwapDirection::NoToUsdc => {
-                require!(
-                    ctx.accounts.vault.amount >= output_u64,
-                    PmAmmError::InsufficientVault
-                );
-            }
-            _ => {}
+        // Fee on the USDC output (USDC-out directions). The user receives net.
+        fee_out = if direction.is_usdc_out() {
+            fee_of(output_u64)
+        } else {
+            0
+        };
+        let user_receives = output_u64.saturating_sub(fee_out);
+        require!(user_receives >= min_output, PmAmmError::SlippageExceeded);
+
+        // USDC-out: the vault must cover the FULL gross output (user net + fee).
+        if direction.is_usdc_out() {
+            require!(
+                ctx.accounts.vault.amount >= output_u64,
+                PmAmmError::InsufficientVault
+            );
         }
 
-        // SOLVENCY GUARD (fix #1): the swap-AMM mints YES/NO as liabilities, so
-        // a trade can mint more winning tokens than the vault backs. Require the
-        // vault to still cover the worst-case redemption AFTER this trade —
-        // max over YES/NO of (circulating supply + remaining reserve), since
-        // every reserve token is eventually distributed to LPs and the winning
-        // side redeems 1 USDC each. Reject otherwise (keeps `claim_winnings`
-        // always solvent: no winner can ever be locked out).
+        // SOLVENCY GUARD (fix #1): after this trade the vault must still cover
+        // max over YES/NO of (circulating supply + remaining reserve). The fee
+        // never touches the YES/NO supply; on USDC-in only the NET enters the
+        // vault, on USDC-out the full gross leaves it.
         {
             let ys = ctx.accounts.yes_mint.supply;
             let ns = ctx.accounts.no_mint.supply;
@@ -135,16 +189,12 @@ pub fn handler(
             let rx = result.x_new.max(I80F48::ZERO).to_num::<u64>();
             let ry = result.y_new.max(I80F48::ZERO).to_num::<u64>();
             let (post_ys, post_ns, post_vault) = match direction {
-                SwapDirection::UsdcToYes => (
-                    ys.saturating_add(output_u64),
-                    ns,
-                    v.saturating_add(amount_in),
-                ),
-                SwapDirection::UsdcToNo => (
-                    ys,
-                    ns.saturating_add(output_u64),
-                    v.saturating_add(amount_in),
-                ),
+                SwapDirection::UsdcToYes => {
+                    (ys.saturating_add(output_u64), ns, v.saturating_add(swap_in))
+                }
+                SwapDirection::UsdcToNo => {
+                    (ys, ns.saturating_add(output_u64), v.saturating_add(swap_in))
+                }
                 SwapDirection::YesToUsdc => (
                     ys.saturating_sub(amount_in),
                     ns,
@@ -181,8 +231,27 @@ pub fn handler(
     let tp = ctx.accounts.token_program.key();
     let market_info = ctx.accounts.market.to_account_info();
 
+    // Total fee (only one of fee_in / fee_out is non-zero) split 50/50.
+    let total_fee = fee_in + fee_out;
+    let dao_cut = total_fee / 2;
+    let creator_cut = total_fee - dao_cut;
+
+    // Validate the optional creator fee account (absent => swapper is the
+    // creator, who keeps their own share).
+    if let Some(creator) = ctx.accounts.creator_usdc.as_ref() {
+        require!(
+            creator.owner == ctx.accounts.market.authority,
+            PmAmmError::Unauthorized
+        );
+        require!(
+            creator.mint == ctx.accounts.market.collateral_mint,
+            PmAmmError::InvalidVault
+        );
+    }
+
     match direction {
-        SwapDirection::UsdcToYes => {
+        SwapDirection::UsdcToYes | SwapDirection::UsdcToNo => {
+            // Net USDC → vault (backing); fee → DAO + creator (user signs).
             token::transfer(
                 CpiContext::new(
                     tp,
@@ -192,14 +261,54 @@ pub fn handler(
                         authority: ctx.accounts.signer.to_account_info(),
                     },
                 ),
-                amount_in,
+                swap_in,
             )?;
+            if dao_cut > 0 {
+                token::transfer(
+                    CpiContext::new(
+                        tp,
+                        Transfer {
+                            from: ctx.accounts.user_collateral.to_account_info(),
+                            to: ctx.accounts.dao_usdc.to_account_info(),
+                            authority: ctx.accounts.signer.to_account_info(),
+                        },
+                    ),
+                    dao_cut,
+                )?;
+            }
+            if creator_cut > 0 {
+                if let Some(creator) = ctx.accounts.creator_usdc.as_ref() {
+                    token::transfer(
+                        CpiContext::new(
+                            tp,
+                            Transfer {
+                                from: ctx.accounts.user_collateral.to_account_info(),
+                                to: creator.to_account_info(),
+                                authority: ctx.accounts.signer.to_account_info(),
+                            },
+                        ),
+                        creator_cut,
+                    )?;
+                }
+                // else: swapper IS the creator → they keep creator_cut
+                // (only swap_in + dao_cut left their account).
+            }
+            let mint_ai = if matches!(direction, SwapDirection::UsdcToYes) {
+                ctx.accounts.yes_mint.to_account_info()
+            } else {
+                ctx.accounts.no_mint.to_account_info()
+            };
+            let to_ai = if matches!(direction, SwapDirection::UsdcToYes) {
+                ctx.accounts.user_yes.to_account_info()
+            } else {
+                ctx.accounts.user_no.to_account_info()
+            };
             token::mint_to(
                 CpiContext::new_with_signer(
                     tp,
                     MintTo {
-                        mint: ctx.accounts.yes_mint.to_account_info(),
-                        to: ctx.accounts.user_yes.to_account_info(),
+                        mint: mint_ai,
+                        to: to_ai,
                         authority: market_info,
                     },
                     seeds,
@@ -207,80 +316,76 @@ pub fn handler(
                 output_u64,
             )?;
         }
-        SwapDirection::UsdcToNo => {
-            token::transfer(
-                CpiContext::new(
-                    tp,
-                    Transfer {
-                        from: ctx.accounts.user_collateral.to_account_info(),
-                        to: ctx.accounts.vault.to_account_info(),
-                        authority: ctx.accounts.signer.to_account_info(),
-                    },
-                ),
-                amount_in,
-            )?;
-            token::mint_to(
-                CpiContext::new_with_signer(
-                    tp,
-                    MintTo {
-                        mint: ctx.accounts.no_mint.to_account_info(),
-                        to: ctx.accounts.user_no.to_account_info(),
-                        authority: market_info,
-                    },
-                    seeds,
-                ),
-                output_u64,
-            )?;
-        }
-        SwapDirection::YesToUsdc => {
+        SwapDirection::YesToUsdc | SwapDirection::NoToUsdc => {
+            let burn_mint = if matches!(direction, SwapDirection::YesToUsdc) {
+                ctx.accounts.yes_mint.to_account_info()
+            } else {
+                ctx.accounts.no_mint.to_account_info()
+            };
+            let burn_from = if matches!(direction, SwapDirection::YesToUsdc) {
+                ctx.accounts.user_yes.to_account_info()
+            } else {
+                ctx.accounts.user_no.to_account_info()
+            };
             token::burn(
                 CpiContext::new(
                     tp,
                     Burn {
-                        mint: ctx.accounts.yes_mint.to_account_info(),
-                        from: ctx.accounts.user_yes.to_account_info(),
+                        mint: burn_mint,
+                        from: burn_from,
                         authority: ctx.accounts.signer.to_account_info(),
                     },
                 ),
                 amount_in,
             )?;
+            // Net USDC → user; fee → DAO + creator (vault PDA signs). When the
+            // swapper IS the creator (creator_usdc = None), fold creator_cut
+            // back into their payout.
+            let creator_present = ctx.accounts.creator_usdc.is_some();
+            let to_user =
+                output_u64.saturating_sub(fee_out) + if creator_present { 0 } else { creator_cut };
             token::transfer(
                 CpiContext::new_with_signer(
                     tp,
                     Transfer {
                         from: ctx.accounts.vault.to_account_info(),
                         to: ctx.accounts.user_collateral.to_account_info(),
-                        authority: market_info,
+                        authority: market_info.clone(),
                     },
                     seeds,
                 ),
-                output_u64,
+                to_user,
             )?;
-        }
-        SwapDirection::NoToUsdc => {
-            token::burn(
-                CpiContext::new(
-                    tp,
-                    Burn {
-                        mint: ctx.accounts.no_mint.to_account_info(),
-                        from: ctx.accounts.user_no.to_account_info(),
-                        authority: ctx.accounts.signer.to_account_info(),
-                    },
-                ),
-                amount_in,
-            )?;
-            token::transfer(
-                CpiContext::new_with_signer(
-                    tp,
-                    Transfer {
-                        from: ctx.accounts.vault.to_account_info(),
-                        to: ctx.accounts.user_collateral.to_account_info(),
-                        authority: market_info,
-                    },
-                    seeds,
-                ),
-                output_u64,
-            )?;
+            if dao_cut > 0 {
+                token::transfer(
+                    CpiContext::new_with_signer(
+                        tp,
+                        Transfer {
+                            from: ctx.accounts.vault.to_account_info(),
+                            to: ctx.accounts.dao_usdc.to_account_info(),
+                            authority: market_info.clone(),
+                        },
+                        seeds,
+                    ),
+                    dao_cut,
+                )?;
+            }
+            if creator_cut > 0 {
+                if let Some(creator) = ctx.accounts.creator_usdc.as_ref() {
+                    token::transfer(
+                        CpiContext::new_with_signer(
+                            tp,
+                            Transfer {
+                                from: ctx.accounts.vault.to_account_info(),
+                                to: creator.to_account_info(),
+                                authority: market_info,
+                            },
+                            seeds,
+                        ),
+                        creator_cut,
+                    )?;
+                }
+            }
         }
         SwapDirection::YesToNo => {
             token::burn(

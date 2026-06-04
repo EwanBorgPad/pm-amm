@@ -52,6 +52,7 @@ const MARKET_SEED = Buffer.from("market");
 
 /** Metaplex Token Metadata Program — required by initialize_market. */
 const METAPLEX_PROGRAM_ID = new PublicKey("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+const PROTOCOL_DAO = new PublicKey("HKLjYENZaFghSp2TM5VJad32wVu7d2XCMJZqKGTQ3ZeL");
 
 function deriveMetadataPda(mint: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(
@@ -377,6 +378,12 @@ describe("access_control", () => {
     // Authority redeems some balance via redeem_pair after acquiring YES+NO
     // through deposit/withdraw cycle. Simpler path: use existing reserves —
     // swap then withdraw to obtain both sides.
+    const daoUsdc = await createTokenAccount(
+      provider.connection,
+      payer,
+      collateralMint,
+      PROTOCOL_DAO,
+    );
     await m
       .swap({ usdcToYes: {} }, new anchor.BN(10_000_000), new anchor.BN(0))
       .accountsPartial({
@@ -389,6 +396,8 @@ describe("access_control", () => {
         userCollateral: authorityUsdc,
         userYes: authorityYes,
         userNo: authorityNo,
+        daoUsdc,
+        creatorUsdc: null, // swapper IS the creator → keeps their fee share
         tokenProgram: TOKEN_PROGRAM_ID,
       })
       .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])

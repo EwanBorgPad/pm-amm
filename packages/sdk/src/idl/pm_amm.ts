@@ -2283,6 +2283,24 @@ export type PmAmm = {
           "writable": true
         },
         {
+          "name": "daoUsdc",
+          "docs": [
+            "Protocol DAO's USDC ATA — receives 50% of the swap fee."
+          ],
+          "writable": true
+        },
+        {
+          "name": "creatorUsdc",
+          "docs": [
+            "Market creator's USDC ATA — receives 50% of the swap fee. OPTIONAL: pass",
+            "`None` when the swapper IS the creator (they keep their fee share), which",
+            "also avoids a duplicate-mutable-account error with `user_collateral`.",
+            "Validated in the handler when present (owner == market.authority)."
+          ],
+          "writable": true,
+          "optional": true
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         }
