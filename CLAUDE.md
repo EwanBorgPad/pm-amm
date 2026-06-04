@@ -14,13 +14,14 @@ Built for the $PREDICT hackathon. Deadline: April 26, 2026.
 - **TS SDK**: `@pm-amm/sdk` (`packages/sdk`) — wraps all 26 instructions + PDAs + reads + math; the front consumes it.
 - **Deployer/faucet keypair**: `~/.config/solana/id.json` (= upgrade + mint authority). `pnpm run deploy` deploys/upgrades via the program keypair `anchor/target/deploy/pm_amm-keypair.json` (the prior B1fu keypair is backed up at `pm_amm-keypair.B1fu.bak.json`).
 
-## Mainnet (config ready; deploy is operator-run)
+## Mainnet (LIVE)
 
 Full guide: `MAINNET.md`. Key facts:
-- **Same program ID** as devnet (`GV1F…`) — `declare_id!` is compiled in, clusters are isolated.
+- **Program deployed** at `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` (same ID as devnet — `declare_id!` compiled in, clusters isolated).
+- **Upgrade authority**: `2TBg1fasPKnBczbtJpvD6LmEUxNnCoigTDQHB3VnUpv7` (dedicated mainnet key — NOT the devnet `6NG87…`). Single-key.
 - **Real USDC**: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (Circle, 6 decimals).
-- **New dedicated upgrade-authority keypair** (operator generates + funds it; ~10 SOL real). NOT the devnet `6NG87…` key.
-- Deploy: `MAINNET_RPC_URL=… MAINNET_AUTHORITY_KEYPAIR=… pnpm run deploy:mainnet` (interactive confirm).
+- Deployed with `MAINNET_MAX_LEN=1400000` (~9.75 SOL rent, recoverable). On-chain IDL deferred (account `E4Fm…` partial, ~0.064 SOL parked; `anchor idl` lacks priority fees → congestion-blocked).
+- Deploy/upgrade: `MAINNET_RPC_URL=… MAINNET_AUTHORITY_KEYPAIR=… [MAINNET_MAX_LEN=1400000] pnpm run deploy:mainnet` (interactive confirm). **Needs a dedicated RPC** (public rate-limits the writes); the script passes `--use-rpc` + a priority fee (mainnet congestion → "Max retries" otherwise).
 - Front (Vercel prod env): `app/.env.mainnet.example` → `NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta`, the program ID, the real USDC, a dedicated RPC. **Never set `MINT_AUTHORITY_KEY`** — faucet is hard-disabled on mainnet (UI hidden + API 503).
 - Program is collateral-agnostic (mints only YES/NO, never USDC) → no on-chain change for real USDC.
 - **Knowingly-accepted risks** (NOT fixed): centralized resolution (#2/#3), single-key upgrade authority, no third-party audit, multi-outcome Σ pᵢ left to arbitrage.
