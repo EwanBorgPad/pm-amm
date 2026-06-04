@@ -10,6 +10,7 @@ import { useClient } from "@/lib/pm-amm-client";
 import { useSwapQuote, type SwapMode } from "@/hooks/use-swap-quote";
 import { formatUsdc } from "@pm-amm/sdk/math";
 import type { SwapDirection } from "@pm-amm/sdk";
+import { PROTOCOL_DAO } from "@pm-amm/sdk";
 import type { MarketData } from "@/hooks/use-markets";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 import { PublicKey, ComputeBudgetProgram, type TransactionInstruction } from "@solana/web3.js";
@@ -99,6 +100,34 @@ export function TradePanel({
         }
       }
 
+      // Fee-recipient USDC ATAs (2% swap fee → 50% DAO, 50% creator). The DAO
+      // key is off-curve. The creator ATA is only needed when the trader is NOT
+      // the creator (else creatorUsdc is null on-chain and they keep their half).
+      const creatorAuthority = new PublicKey(market.authority);
+      const daoUsdcAta = await getAssociatedTokenAddress(USDC_MINT, PROTOCOL_DAO, true);
+      try {
+        await getAccount(conn, daoUsdcAta);
+      } catch {
+        preIxs.push(
+          createAssociatedTokenAccountInstruction(publicKey, daoUsdcAta, PROTOCOL_DAO, USDC_MINT),
+        );
+      }
+      if (!creatorAuthority.equals(publicKey)) {
+        const creatorUsdcAta = await getAssociatedTokenAddress(USDC_MINT, creatorAuthority, true);
+        try {
+          await getAccount(conn, creatorUsdcAta);
+        } catch {
+          preIxs.push(
+            createAssociatedTokenAccountInstruction(
+              publicKey,
+              creatorUsdcAta,
+              creatorAuthority,
+              USDC_MINT,
+            ),
+          );
+        }
+      }
+
       const direction: SwapDirection =
         mode === "buy"
           ? side === "yes"
@@ -127,6 +156,7 @@ export function TradePanel({
         direction,
         amountIn: lamports,
         minOutput,
+        creatorAuthority,
       });
       const tx = await client.sendIxs([...preIxs, swapIx, ...postIxs]);
 

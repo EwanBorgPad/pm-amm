@@ -13,6 +13,7 @@ import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { USDC_MINT } from "@/lib/constants";
 import { getClient } from "@/lib/pm-amm-client";
 import type { PmAmmClient, SwapDirection } from "@pm-amm/sdk";
+import { PROTOCOL_DAO } from "@pm-amm/sdk";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 
 export interface PositionValue {
@@ -60,6 +61,15 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
           if (!info) {
             ataIxs.push(createAssociatedTokenAccountInstruction(publicKey, ata, publicKey, mint));
           }
+        }
+        // DAO fee ATA (off-curve) — required by `swap`; include if missing so the
+        // sell sim doesn't fail. The 2% fee is reflected in the simulated payout,
+        // so the value is the true realizable USDC.
+        const daoUsdc = await getAssociatedTokenAddress(USDC_MINT, PROTOCOL_DAO, true);
+        if (!(await connection.getAccountInfo(daoUsdc))) {
+          ataIxs.push(
+            createAssociatedTokenAccountInstruction(publicKey, daoUsdc, PROTOCOL_DAO, USDC_MINT),
+          );
         }
 
         let yesValueUsdc = 0;
@@ -143,6 +153,7 @@ async function simulateSell(
     direction,
     amountIn: amount,
     minOutput: 0,
+    creatorAuthority: publicKey, // value with creatorUsdc=null (payout is identical)
   });
 
   const tx = new Transaction().add(
