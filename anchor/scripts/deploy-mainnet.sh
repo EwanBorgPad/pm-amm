@@ -36,14 +36,38 @@ echo " Upgrade authority: $AUTH_PUBKEY"
 echo " Authority balance: $BAL"
 echo " RPC:               $MAINNET_RPC_URL"
 echo " .so size:          $(wc -c < "$SO") bytes"
+# Optional MAINNET_MAX_LEN: tighter programdata allocation = ~half the rent
+# (~9 SOL instead of ~18 for this binary). Trade-off: an upgrade that GROWS the
+# .so past this size needs `solana program extend` first. Unquoted on purpose so
+# it word-splits to 0 or 2 args (works on bash 3.2 under `set -u`).
+MAXLEN_FLAG=""
+if [ -n "${MAINNET_MAX_LEN:-}" ]; then
+  MAXLEN_FLAG="--max-len ${MAINNET_MAX_LEN}"
+  echo " max-len:           ${MAINNET_MAX_LEN} bytes (tighter rent, limited upgrade headroom)"
+else
+  echo " max-len:           default (2x program size — full upgrade headroom, ~2x rent)"
+fi
+# Priority fee (micro-lamports/CU): mainnet writes need this to land under
+# congestion — without it the deploy fails with "Max retries exceeded".
+PRIORITY_FEE="${MAINNET_PRIORITY_FEE:-200000}"
+echo " priority fee:      ${PRIORITY_FEE} micro-lamports/CU"
 echo "──────────────────────────────────────────────"
 read -r -p "Type 'DEPLOY MAINNET' to confirm: " CONFIRM
 [ "$CONFIRM" = "DEPLOY MAINNET" ] || { echo "Aborted."; exit 1; }
 
+# --use-rpc + priority fee + extra sign attempts: required for the writes to land
+# on a congested mainnet (without them the deploy fails with "Max retries
+# exceeded"). If it still fails mid-write, the CLI prints a buffer address + a
+# `solana program close <buffer>` command to reclaim the SOL; rerun with that
+# buffer keypair via `--buffer` to resume only the missing chunks (no extra rent).
 solana program deploy "$SO" \
   --program-id "$PROGRAM_KP" \
   --keypair "$MAINNET_AUTHORITY_KEYPAIR" \
   --upgrade-authority "$MAINNET_AUTHORITY_KEYPAIR" \
+  $MAXLEN_FLAG \
+  --use-rpc \
+  --with-compute-unit-price "$PRIORITY_FEE" \
+  --max-sign-attempts 80 \
   --url "$MAINNET_RPC_URL"
 
 echo

@@ -16,6 +16,19 @@ The program itself is **collateral-agnostic** (it never mints USDC, only the
 program-owned YES/NO tokens), so moving to real USDC needs **no on-chain code
 change** — only configuration + a deploy.
 
+## ✅ Current mainnet deployment (LIVE)
+
+| | |
+|---|---|
+| Program ID | `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` |
+| Upgrade authority | `2TBg1fasPKnBczbtJpvD6LmEUxNnCoigTDQHB3VnUpv7` (dedicated mainnet key) |
+| Collateral | real USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` |
+| Deploy mode | `--max-len 1400000` (~9.75 SOL rent, recoverable) |
+| On-chain IDL | deferred (optional — `anchor idl` lacks priority fees, congestion-blocked) |
+
+The steps below are the reproducible procedure (and apply to future **upgrades** —
+same `pnpm run deploy:mainnet`, which reuses the program ID).
+
 ---
 
 ## 1. Build the program
@@ -33,8 +46,15 @@ secret safe — it controls every vault.
 ```bash
 solana-keygen new -o ~/.config/solana/pm-amm-mainnet.json
 solana-keygen pubkey ~/.config/solana/pm-amm-mainnet.json   # note the address
-# Fund it with ~10 SOL of REAL SOL (program account + upgrade buffer for a ~1.3 MB .so).
 ```
+
+Fund that address with REAL SOL. For this ~1.3 MB program the rent is:
+- **~9.75 SOL** in economical mode (`MAINNET_MAX_LEN=1400000`, recommended)
+- **~18.2 SOL** in default mode (2× upgrade headroom)
+
+Send **~12 SOL** to be safe (rent + fees + margin). The rent is a **recoverable
+deposit** (refunded if you ever `solana program close` the program), not a fee —
+the only truly-spent amount is ~0.02 SOL of transaction fees.
 
 ## 3. Deploy to mainnet (spends real SOL)
 
@@ -45,15 +65,30 @@ in and clusters are isolated. The program-id keypair is already at
 ```bash
 MAINNET_RPC_URL="https://your-dedicated-mainnet-rpc" \
 MAINNET_AUTHORITY_KEYPAIR="$HOME/.config/solana/pm-amm-mainnet.json" \
+MAINNET_MAX_LEN=1400000 \
 pnpm run deploy:mainnet
 ```
 
-The script prints the program ID, authority, and balance, then asks you to type
-`DEPLOY MAINNET` to confirm. Afterwards, verify the authority:
+The script prints the program ID, authority, balance, max-len, and priority fee,
+then asks you to type `DEPLOY MAINNET` to confirm. Afterwards, verify the authority:
 
 ```bash
 solana program show GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y --url "$MAINNET_RPC_URL"
 ```
+
+**Why these flags matter (learned the hard way on the first deploy):**
+- **Use a DEDICATED RPC.** The public endpoint (`api.mainnet-beta.solana.com`)
+  rate-limits the ~1300 write transactions → the deploy dies with
+  `Data writes to account failed: Max retries exceeded`. Helius/Triton/QuickNode work.
+- The script already passes `--use-rpc`, a **priority fee**
+  (`--with-compute-unit-price`, override via `MAINNET_PRIORITY_FEE`, default 200000),
+  and `--max-sign-attempts 80`. Without the priority fee the writes don't land on a
+  congested mainnet — even on a dedicated RPC.
+- `MAINNET_MAX_LEN=1400000` → ~9.75 SOL rent instead of ~18 (less upgrade headroom).
+- **If it fails mid-write**, a buffer is left and the CLI prints its address + a
+  `solana program close <buffer>` command. Your SOL is safe in that buffer. Resume
+  by passing the buffer keypair via `--buffer` (writes only the missing chunks, no
+  extra rent), or close it to reclaim the lamports.
 
 ## 4. Point the front at mainnet (Vercel Production env)
 
@@ -69,8 +104,16 @@ Set these in the Vercel project (see `app/.env.mainnet.example`):
 **Do NOT set `MINT_AUTHORITY_KEY`** — the faucet is hard-disabled on mainnet (the
 button is hidden and the API returns 503). Real USDC is not mintable.
 
-Redeploy the front. The first swap on any market will create the protocol-DAO and
-creator fee ATAs automatically.
+⚠️ **Replace** any existing devnet env vars (don't just add) — a stale
+`NEXT_PUBLIC_PROGRAM_ID`/`NEXT_PUBLIC_USDC_MINT` overrides the code defaults and
+points the app at the wrong cluster.
+
+⚠️ `NEXT_PUBLIC_RPC_URL` is **exposed to the browser**. If you reuse your deploy
+RPC key here, its quota becomes public — for production use a separate front-end
+key with usage limits.
+
+Redeploy the front (env changes need a rebuild). The first swap on any market will
+create the protocol-DAO and creator fee ATAs automatically.
 
 ## 5. Smoke-test with tiny amounts first
 
