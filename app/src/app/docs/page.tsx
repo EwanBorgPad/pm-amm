@@ -97,7 +97,8 @@ function SimpleTab() {
           <Role title="Creator" tone="text-no">
             Open a market yourself, or open a <b>commitment vault</b> so a crowd funds the starting
             liquidity. The crowd&rsquo;s commits set the opening price; once it launches, the
-            committers become the market&rsquo;s LPs.
+            committers become the market&rsquo;s LPs. You earn <b>50% of the 2% swap fee</b> on
+            every trade in your market.
           </Role>
         </div>
       </Section>
@@ -122,10 +123,12 @@ function SimpleTab() {
 
       <Section title="What does it cost?">
         <p className="text-[14px] leading-[1.7] text-text-dim">
-          There is <b>no protocol fee on trades today</b> — a swap returns exactly what the curve
-          quotes (you only pay price impact / slippage). An LP&rsquo;s return comes from the
-          curve&rsquo;s spread and the time-release mechanism, not from a fee. A configurable
-          trading fee (split to the protocol DAO and the market creator) is the planned next step.
+          A swap pays a <b>2% protocol fee on the USDC leg</b>, split{" "}
+          <b className="text-yes">50% to the protocol DAO</b> and{" "}
+          <b className="text-no">50% to the market creator</b>. Trading YES↔NO directly is{" "}
+          <b>free</b>. Beyond the fee you only pay the curve&rsquo;s price impact (slippage). An
+          LP&rsquo;s return comes from the curve spread and the time-release mechanism — the 2% fee
+          does <b>not</b> accrue to LPs.
         </p>
       </Section>
 
@@ -203,7 +206,7 @@ const client = PmAmmClient.fromProvider(provider, PROGRAM_ID, USDC_MINT);       
             ],
             [
               "swap",
-              "Trade USDC↔YES, USDC↔NO, YES↔NO (6 directions). Reverts on slippage or if it would break solvency. SDK: send.swap({market,direction,amountIn,minOutput}).",
+              "Trade USDC↔YES, USDC↔NO, YES↔NO (6 directions). A 2% fee on the USDC leg splits 50% protocol DAO / 50% market creator (YES↔NO is fee-free); reverts on slippage or if it would break solvency. SDK: send.swap({market,direction,amountIn,minOutput}).",
             ],
             [
               "withdraw_liquidity",
