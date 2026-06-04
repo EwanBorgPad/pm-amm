@@ -13,6 +13,11 @@ pm_amm = "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
 [programs.localnet]
 pm_amm = "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
 
+# Same program ID as devnet — declare_id! is compiled in and clusters are
+# isolated. Deploy with anchor/scripts/deploy-mainnet.sh (real SOL).
+[programs.mainnet]
+pm_amm = "GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"

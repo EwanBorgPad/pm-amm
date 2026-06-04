@@ -14,6 +14,17 @@ Built for the $PREDICT hackathon. Deadline: April 26, 2026.
 - **TS SDK**: `@pm-amm/sdk` (`packages/sdk`) — wraps all 26 instructions + PDAs + reads + math; the front consumes it.
 - **Deployer/faucet keypair**: `~/.config/solana/id.json` (= upgrade + mint authority). `pnpm run deploy` deploys/upgrades via the program keypair `anchor/target/deploy/pm_amm-keypair.json` (the prior B1fu keypair is backed up at `pm_amm-keypair.B1fu.bak.json`).
 
+## Mainnet (config ready; deploy is operator-run)
+
+Full guide: `MAINNET.md`. Key facts:
+- **Same program ID** as devnet (`GV1F…`) — `declare_id!` is compiled in, clusters are isolated.
+- **Real USDC**: `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v` (Circle, 6 decimals).
+- **New dedicated upgrade-authority keypair** (operator generates + funds it; ~10 SOL real). NOT the devnet `6NG87…` key.
+- Deploy: `MAINNET_RPC_URL=… MAINNET_AUTHORITY_KEYPAIR=… pnpm run deploy:mainnet` (interactive confirm).
+- Front (Vercel prod env): `app/.env.mainnet.example` → `NEXT_PUBLIC_SOLANA_CLUSTER=mainnet-beta`, the program ID, the real USDC, a dedicated RPC. **Never set `MINT_AUTHORITY_KEY`** — faucet is hard-disabled on mainnet (UI hidden + API 503).
+- Program is collateral-agnostic (mints only YES/NO, never USDC) → no on-chain change for real USDC.
+- **Knowingly-accepted risks** (NOT fixed): centralized resolution (#2/#3), single-key upgrade authority, no third-party audit, multi-outcome Σ pᵢ left to arbitrage.
+
 ### History (superseded deployments)
 - Sprint 24 first redeploy: program `B1fuVjvzN1r7tWPxeexqJmHCoWUHGq3Pz6TpRqH8HbBf` (same USDC `3WQ8…`) — replaced by `GV1F…` to reset to an empty market base.
 - Sprint 21 multi-outcome fork: program `Dxf1PDY1sQjy3qEkekiV26rDv3W6GdkQSKx6hLLf13nK`, USDC `EaMPVLBv3TjQNpzKs3oXaXL6XHJ8aVWLGXgtwunY2xGj`.

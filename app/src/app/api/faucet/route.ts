@@ -9,6 +9,14 @@ import {
 const AMOUNT = 1000_000_000; // 1000 mUSDC
 
 export async function POST(req: Request) {
+  // Hard-disable on mainnet: real USDC has no mint authority, so the faucet is
+  // meaningless there (and we must never wire a mint authority for real funds).
+  if (process.env.NEXT_PUBLIC_SOLANA_CLUSTER === "mainnet-beta") {
+    return NextResponse.json(
+      { error: "Faucet disabled on mainnet (real USDC is not mintable)" },
+      { status: 503 },
+    );
+  }
   const keyB64 = process.env.MINT_AUTHORITY_KEY;
   const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com";
   // Read the USDC mint from env so the faucet matches the fork's deployment.
