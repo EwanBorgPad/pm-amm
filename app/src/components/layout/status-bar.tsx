@@ -7,7 +7,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Wordmark } from "@/components/ui/wordmark";
 import { useMarkets } from "@/hooks/use-markets";
 import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
-import { CLUSTER } from "@/lib/constants";
+import { CLUSTER, IS_MAINNET } from "@/lib/constants";
 import { toast } from "sonner";
 
 const WalletMultiButton = dynamic(
@@ -113,13 +113,15 @@ export function StatusBar() {
         </Link>
         {publicKey && (
           <>
-            <button
-              onClick={handleFaucet}
-              disabled={minting}
-              className="text-yes hover:text-text-hi transition-all duration-[120ms] cursor-pointer disabled:opacity-50"
-            >
-              {minting ? "..." : "$FAUCET_mUSDC"}
-            </button>
+            {!IS_MAINNET && (
+              <button
+                onClick={handleFaucet}
+                disabled={minting}
+                className="text-yes hover:text-text-hi transition-all duration-[120ms] cursor-pointer disabled:opacity-50"
+              >
+                {minting ? "..." : "$FAUCET_mUSDC"}
+              </button>
+            )}
             <Link
               href="/admin"
               className="text-muted hover:text-text-hi transition-all duration-[120ms]"
