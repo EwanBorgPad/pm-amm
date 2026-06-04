@@ -7,7 +7,7 @@ import { PublicKey, SystemProgram, type TransactionInstruction } from "@solana/w
 import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
 import type { BN } from "@anchor-lang/core";
 import { type IxContext, bn } from "./context";
-import { SYSVAR_RENT_PUBKEY } from "../constants";
+import { SYSVAR_RENT_PUBKEY, PROTOCOL_DAO } from "../constants";
 import {
   deriveMarketPda,
   deriveYesMint,
@@ -84,10 +84,22 @@ export async function buildSwap(
     direction: SwapDirection;
     amountIn: Amount;
     minOutput: Amount;
+    /** Market creator (= market.authority), receiver of 50% of the swap fee.
+     *  Fetched from the market account when omitted. */
+    creatorAuthority?: PublicKey;
   },
 ): Promise<TransactionInstruction> {
   const yesMint = deriveYesMint(ctx.programId, p.market);
   const noMint = deriveNoMint(ctx.programId, p.market);
+  const authority =
+    p.creatorAuthority ??
+    ((await ctx.program.account.market.fetch(p.market)).authority as PublicKey);
+  // The swapper keeps their own fee share when they ARE the creator → pass
+  // `creatorUsdc = null` (optional account) to avoid a duplicate-mutable error
+  // with `userCollateral`. The DAO key is off-curve → allowOwnerOffCurve.
+  const creatorUsdc = authority.equals(p.signer)
+    ? null
+    : await getAssociatedTokenAddress(ctx.collateralMint, authority, true);
   return ctx.program.methods
     .swap(swapDirectionArg(p.direction), bn(p.amountIn), bn(p.minOutput))
     .accountsPartial({
@@ -100,6 +112,8 @@ export async function buildSwap(
       userCollateral: await getAssociatedTokenAddress(ctx.collateralMint, p.signer),
       userYes: await getAssociatedTokenAddress(yesMint, p.signer),
       userNo: await getAssociatedTokenAddress(noMint, p.signer),
+      daoUsdc: await getAssociatedTokenAddress(ctx.collateralMint, PROTOCOL_DAO, true),
+      creatorUsdc,
       tokenProgram: TOKEN_PROGRAM_ID,
     })
     .instruction();

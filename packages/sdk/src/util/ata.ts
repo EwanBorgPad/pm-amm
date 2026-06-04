@@ -17,8 +17,9 @@ export async function ensureAtaIx(
   payer: PublicKey,
   owner: PublicKey,
   mint: PublicKey,
+  allowOwnerOffCurve = false,
 ): Promise<{ ata: PublicKey; ix: TransactionInstruction | null }> {
-  const ata = await getAssociatedTokenAddress(mint, owner);
+  const ata = await getAssociatedTokenAddress(mint, owner, allowOwnerOffCurve);
   const info = await connection.getAccountInfo(ata);
   const ix = info ? null : createAssociatedTokenAccountInstruction(payer, ata, owner, mint);
   return { ata, ix };

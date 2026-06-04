@@ -184,7 +184,9 @@ python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (13
   Pyth/Switchboard or a multisig with appeal timelock.
 - **Multi-outcome rebalancing**: Σ p_i = 1 is enforced on-chain at seed and at resolution; keeping
   it tight *between* trades is left to an off-chain dispatcher (Vyber pattern).
-- **0% fees**: no trading fees (pure LVR model)
+- **Protocol fee**: a 2% fee on USDC↔YES/NO swaps, split 50% to the protocol DAO and 50% to the
+  market creator. Pure YES↔NO swaps are fee-free. The fee does **not** accrue to LPs — their
+  economics remain the curve spread + `dC_t`/LVR.
 - **Single-key upgrade authority**: not mainnet-grade. Move to a Squads multisig before any
   production deployment.
 
@@ -194,7 +196,8 @@ python3 oracle/test_oracle.py && python3 oracle/test_properties.py  # Python (13
 - [ ] Adopt Matt's Sprint 20 fully-backed model (`mint_pair` + `swap_yes_no`) once the Rust source is published upstream
 - [ ] On-chain dispatcher for atomic inter-leg Σ p_i rebalancing
 - [ ] Oracle integration (Switchboard/Pyth for auto-resolution)
-- [ ] Trading fees (LP incentive beyond dC_t)
+- [x] Protocol swap fee — 2% on USDC↔YES/NO, split 50% DAO / 50% market creator
+- [ ] LP-directed fees (incentive beyond `dC_t`)
 - [ ] Delta hedging tools for sophisticated LPs
 
 ---
