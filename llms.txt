@@ -1,0 +1,76 @@
+# pm-AMM — Paradigm dynamic pm-AMM on Solana
+
+> First production implementation of the Paradigm pm-AMM paper (Moallemi & Robinson, Nov 2024) on Solana. A prediction-market AMM whose effective liquidity decays as `L_eff = L_0·√(T−t)`, giving liquidity providers a loss-versus-rebalancing (LVR) that is **uniform in price and time**. Anchor (Rust) program + framework-agnostic TypeScript SDK (`@pm-amm/sdk`) + Next.js front + Python reference oracle. **Live on devnet and mainnet-beta.**
+
+This is a pnpm monorepo. The on-chain math is the source of truth and is a faithful port of the paper (`doc/wp-para.md`); the Python oracle (`oracle/`) cross-checks it against scipy, and the SDK's `math.ts` is a float64 port for client-side quoting. A market mints two SPL tokens (YES / NO) that each redeem for 1 USDC if their side wins; the program is **collateral-agnostic** (it never mints the collateral, only YES/NO), so the same bytecode runs against the devnet mock USDC and real mainnet USDC. Reserves `x`/`y` are *virtual* curve counters — real YES/NO tokens are minted to users only on swap / withdraw / residual-claim.
+
+Read `CLAUDE.md` first for the canonical project state (deployments, sprint history, invariants, rules). Then `README.md` for the pitch and verified results, and `doc/api-reference.md` for every instruction + SDK function.
+
+## Start here
+- [CLAUDE.md](CLAUDE.md): canonical state — deployments, addresses, sprint history, math invariants, hard rules ("EXACT formulas from the paper", 400k CU on mutative ix, never deviate from the paper without approval).
+- [README.md](README.md): what it is, the verified properties (uniform LVR, E[W_T]=W_0/2), roadmap, known limitations.
+- [doc/wp-para.md](doc/wp-para.md): the Paradigm pm-AMM paper — **source of truth for ALL math**.
+- [doc/api-reference.md](doc/api-reference.md): per-instruction + per-SDK-function reference, including the collateralization & fee model.
+
+## On-chain program (Anchor / Rust, `anchor/programs/pm_amm/src/`)
+26 instructions. Program ID `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y` (same on devnet + mainnet; `declare_id!` compiled in, clusters isolated). Fixed-point math uses `fixed::I80F48` (Q64.64).
+- [lib.rs](anchor/programs/pm_amm/src/lib.rs): program entrypoint + `declare_id!`; wires all 26 handlers.
+- [pm_math.rs](anchor/programs/pm_amm/src/pm_math.rs): φ, Φ, Φ⁻¹, reserves (eq. 5/6), pool value `V(P)`, swap output, and `suggest_l_zero_for_max_reserve` (the audit-#1 solvency calibration so `max(x,y)=deposit`).
+- [accrual.rs](anchor/programs/pm_amm/src/accrual.rs): the `dC_t` mechanism — per-share accumulators (`cum_yes_per_share`/`cum_no_per_share`) that continuously release reserves to LPs as `L_eff` shrinks.
+- [state.rs](anchor/programs/pm_amm/src/state.rs): `Market`, `LpPosition`, `GroupMarket`, commitment-vault accounts; PDA layouts + space.
+- [errors.rs](anchor/programs/pm_amm/src/errors.rs): `PmAmmError` codes.
+- Binary-market ix (10): `initialize_market`, `deposit_liquidity`, `swap`, `withdraw_liquidity`, `accrue`, `claim_lp_residuals`, `redeem_pair`, `suggest_l_zero`, `resolve_market`, `claim_winnings` — see `instructions/*.rs`.
+- Multi-outcome / group ix (5): `initialize_group_market`, `attach_leg_to_group`, `resolve_group`, `resolve_group_leg`, `cancel_group_market` — see `instructions/group/`. A `GroupMarket` wraps N binary markets as legs of a categorical market; Σ pᵢ tracked via `total_seeded_bps`.
+- Binary commitment-vault ix (5): `initialize_vault`, `vault_commit`, `launch_vault_market`, `claim_committer`, `refund_commit` — `instructions/vault/`. Crowd-bootstraps a market's liquidity; committers become its LPs.
+- Multi-outcome commitment-vault ix (6): `initialize_vault_group`, `vault_commit_group`, `launch_vault_group_market`, `launch_vault_group_leg`, `claim_committer_group`, `refund_commit_group` — `instructions/vault/`.
+- [instructions/swap.rs](anchor/programs/pm_amm/src/instructions/swap.rs): 6-direction swap (USDC↔YES, USDC↔NO, YES↔NO) + the **2% protocol fee** (see below).
+
+## Swap fee (2%, 50% DAO / 50% creator)
+- `SWAP_FEE_BPS = 200` on the **USDC leg** of a swap: skimmed off the **input** on a buy (only the net backs the vault) and off the **curve output** on a sell. Pure YES↔NO swaps are fee-free.
+- Split 50% to the protocol DAO `HKLjYENZaFghSp2TM5VJad32wVu7d2XCMJZqKGTQ3ZeL` and 50% to the market creator (`market.authority`).
+- `creator_usdc` is an **optional** account: when the swapper IS the creator it is passed as `null` (they keep their share), which also avoids an Anchor `ConstraintDuplicateMutableAccount` error. The DAO key is off-curve → ATA derivation uses `allowOwnerOffCurve`.
+- The fee does **not** accrue to LPs; the post-trade solvency guard still holds (checked against the real vault balance).
+
+## Critical math invariants (never deviate without approval)
+- Dynamic invariant: `(y−x)·Φ((y−x)/L_eff) + L_eff·φ((y−x)/L_eff) − y = 0`.
+- `L_eff = L_0·√(T−t)`; reserves `x*(P)`/`y*(P)` per eq. (5)/(6); pool value `V(P) = L_eff·φ(Φ⁻¹(P))`.
+- Constant expected LVR `E[LVR_t] = V_0/(2T)`; terminal wealth `E[W_T] = W_0/2`.
+- **Solvency**: `vault.usdc ≥ max(yes_supply + reserve_yes, no_supply + reserve_no)` at all `t`. Holds because the first deposit calibrates `L_0` so `max(x,y)=deposit` and `swap` hard-reverts any trade that would break it.
+
+## TypeScript SDK — `@pm-amm/sdk` (`packages/sdk/src/`)
+Framework-agnostic; wraps all 26 instructions + PDAs + typed reads + math. The front consumes it. Build with tsup (ESM+CJS+d.ts); peer-deps on `@anchor-lang/core` / `@solana/web3.js` / `@solana/spl-token`.
+- [client.ts](packages/sdk/src/client.ts): `PmAmmClient` (`readOnly` / `withWallet`) — one Program override, helper PDAs, typed `fetch*` reads, and `ix` / `send` / `flows` namespaces.
+- [math.ts](packages/sdk/src/math.ts): float64 port of the on-chain math (sub-export `@pm-amm/sdk/math`) — `estimateSwapOutput`, `poolValue`, `priceFromReserves`, `formatUsdc`, etc.
+- [pda.ts](packages/sdk/src/pda.ts): pure `derive*(programId, …)` for every PDA.
+- [constants.ts](packages/sdk/src/constants.ts): `PROTOCOL_DAO`, `SWAP_FEE_BPS`, Metaplex id, CU budgets, seeds, solscan helpers.
+- [ix/](packages/sdk/src/ix/): instruction builders — `market.ts`, `group.ts`, `vault.ts`, `vaultGroup.ts` (each returns a `TransactionInstruction`).
+- [send.ts](packages/sdk/src/send.ts): `send.*` wrappers (compute-budget preinstruction + idempotent ATA creates + send/confirm).
+- [idl/](packages/sdk/src/idl/): canonical IDL JSON + camelCase TS types, synced from the program via `scripts/sync-idl.mjs`.
+
+## Frontend (Next.js App Router, `app/src/`)
+Landing `/` + live feed `/markets` + create flows + `/docs` (Simple/Detailed tabs). Consumes the SDK only; cluster-aware (devnet/mainnet) via `NEXT_PUBLIC_*`.
+- [app/src/lib/constants.ts](app/src/lib/constants.ts): reads env (`NEXT_PUBLIC_SOLANA_CLUSTER`, program id, USDC mint, RPC); `IS_MAINNET` gates the faucet.
+- [app/src/components/trade-panel.tsx](app/src/components/trade-panel.tsx): swap UI (composes the tx, creates the fee ATAs, slippage `minOutput`).
+- [app/src/hooks/use-swap-quote.ts](app/src/hooks/use-swap-quote.ts): on-chain-sim-first quote with a fee-aware client-side fallback.
+- [app/src/app/api/faucet/route.ts](app/src/app/api/faucet/route.ts): mock-USDC faucet — **hard-disabled on mainnet** (503).
+- [app/src/app/docs/page.tsx](app/src/app/docs/page.tsx): in-app docs (Simple + per-function Detailed tabs).
+
+## Deployment
+- [MAINNET.md](MAINNET.md): mainnet-beta runbook (build → fund a dedicated authority key → `pnpm run deploy:mainnet` with a **dedicated RPC + priority fee** → Vercel env → smoke-test). Documents the knowingly-accepted risks.
+- **Mainnet (LIVE)**: program `GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y`, upgrade authority `2TBg1fasPKnBczbtJpvD6LmEUxNnCoigTDQHB3VnUpv7`, real USDC `EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v`.
+- **Devnet**: same program ID; mock USDC `3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ` (mint authority `6NG87yZrQw6zH6Au8fHbYcD7Dken5smAzisLeXazpt8E`); `pnpm run deploy`, `pnpm run musdc`, `pnpm run seed`.
+- [anchor/scripts/deploy-mainnet.sh](anchor/scripts/deploy-mainnet.sh): the mainnet deploy/upgrade script (`--use-rpc` + `--with-compute-unit-price` + `--max-len`).
+
+## Tests (must stay green)
+- Rust unit (73): `pnpm run test:rust` — `pm_math`, `accrual`, `state`, `group`, `vault`, `vault_group`.
+- TS integration (65, localnet): `pnpm run test` — `pm_amm.ts`, `group_market.ts`, `access_control.ts`, `vault.ts`, `vault_group.ts` (incl. the 2% fee split assertion).
+- Python oracle (112) + properties (18): `python3 oracle/test_oracle.py`, `python3 oracle/test_properties.py` — scipy reference + paper properties A–G.
+- [scripts/check_idl_coherence.py](scripts/check_idl_coherence.py): CI guard that the IDL matches the on-chain struct sizes.
+
+## Knowingly-accepted risks (POC, NOT fixed)
+Centralized admin-only resolution (no oracle/timelock/dispute, audit #2/#3); single-key upgrade authority; no third-party audit; multi-outcome Σ pᵢ kept to 1 only at seed/resolution (arbitrage between trades). See `MAINNET.md` and `README.md` "Known limitations".
+
+## Optional
+- [packages/sdk/README.md](packages/sdk/README.md): SDK quickstart + API.
+- [oracle/](oracle/): Python reference oracle (scipy) — the math ground truth.
+- [Anchor.toml](anchor/Anchor.toml): program ids per cluster, test/validator config.
