@@ -15,6 +15,7 @@ continuous LP yield (dC_t), and permissionless Commitment Vaults (binary + multi
   EXCEPTIONS that take RAW 6dp micro-units: `send.swap(amountInMicro, minOutputMicro)`, `send.redeemPair(amountMicro)`.
   `ix.*` builders take raw `BN | number | bigint` for all amounts (no human conversion).
 - **Side** = `"yes" | "no"`. **SwapDirection** = `"usdcToYes" | "usdcToNo" | "yesToUsdc" | "noToUsdc" | "yesToNo" | "noToYes"`.
+- **Swap fee (2%)**: every USDC↔YES/NO swap charges a 2% protocol fee on the USDC leg (off the input on a buy, off the curve output on a sell); pure YES↔NO is free. Split 50% protocol DAO / 50% market creator. The SDK handles the fee accounts for you — `ix.swap`/`send.swap` derive `daoUsdc` + (optional) `creatorUsdc` automatically. Consequence: a buy of N USDC trades ~`0.98·N` on the curve. `math.estimateSwapOutput` is **fee-unaware** → apply the 2% yourself when sizing `minOutput`.
 - **PDAs**: pure `derive*(programId, ...)` functions take programId FIRST. The client exposes bound versions without programId (`client.yesMint(market)`).
 - **Address override**: the client overrides the bundled IDL `address` with your `programId` once; the bundled value is irrelevant.
 - **Compute budget + ATAs**: `send.*` auto-prepends the correct CU budget and creates missing associated token accounts. `ix.*` does NEITHER — you compose those yourself.
@@ -22,12 +23,17 @@ continuous LP yield (dC_t), and permissionless Commitment Vaults (binary + multi
 - **Peer deps** (consumer provides a single copy): `@solana/web3.js@^1.98`, `@anchor-lang/core@^1.0`, `@solana/spl-token@^0.4`. Browser needs a `Buffer` polyfill. `BN` is imported from `@anchor-lang/core`.
 - **Node ESM caveat**: `@anchor-lang/core` is CJS; importing the SDK's ESM build under raw Node fails on the named `BN` import. Use a bundler (Next/Vite) or the CJS build (`require`).
 
-## Devnet deployment (current)
+## Deployments (same PROGRAM_ID on both clusters)
 
 ```
-PROGRAM_ID = GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y
-USDC_MINT  = 3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ   // mock USDC, 6 decimals
+PROGRAM_ID = GV1FMGHRYBjQLaghE5fnGuYCuCcpdt3GD5xEX3TwN16y    // devnet + mainnet-beta
+
+// devnet
+USDC_MINT  = 3WQ8hCqTNwjrh8WzE2XyoZoUrd1miPcwWfMkmFPUMEWZ    // mock USDC, 6 decimals
+// mainnet-beta (LIVE)
+USDC_MINT  = EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v    // real USDC (Circle), 6 decimals
 ```
+Pass the cluster's USDC mint as `collateralMint` to the client; nothing else changes.
 
 ## Install
 
@@ -107,7 +113,7 @@ Binary market:
 ```ts
 client.ix.initializeMarket({ authority: PublicKey, marketId: number|bigint, endTs: number|bigint, name: string, initialPriceBps: number })
 client.ix.depositLiquidity({ signer: PublicKey, market: PublicKey, amount: BN|number|bigint })
-client.ix.swap({ signer, market, direction: SwapDirection, amountIn: BN|number|bigint, minOutput: BN|number|bigint })
+client.ix.swap({ signer, market, direction: SwapDirection, amountIn: BN|number|bigint, minOutput: BN|number|bigint, creatorAuthority?: PublicKey })   // 2% fee auto-handled; creatorAuthority is fetched from the market if omitted (pass it to skip the RPC)
 client.ix.withdrawLiquidity({ signer, market, sharesToBurn: BN|number|bigint })   // shares are Q64.64
 client.ix.accrue({ market })
 client.ix.claimLpResiduals({ signer, market })
@@ -250,8 +256,9 @@ expectedDriftAfterBet(legReserveYes, legReserveNo, legLEff, betUsd, side?): numb
 import { mapAnchorError, PM_AMM_ERRORS } from "@pm-amm/sdk";
 mapAnchorError(err: unknown): { code: number; name: string; msg?: string } | null
 
-import { METAPLEX_PROGRAM_ID, SYSVAR_RENT_PUBKEY, CU, SEEDS, solscanTxUrl, solscanAccountUrl } from "@pm-amm/sdk";
+import { METAPLEX_PROGRAM_ID, SYSVAR_RENT_PUBKEY, CU, SEEDS, PROTOCOL_DAO, SWAP_FEE_BPS, solscanTxUrl, solscanAccountUrl } from "@pm-amm/sdk";
 // CU = { DEFAULT: 400000, HEAVY: 1400000 }
+// SWAP_FEE_BPS = 200 (2%); PROTOCOL_DAO = HKLjYENZaFghSp2TM5VJad32wVu7d2XCMJZqKGTQ3ZeL (50% of the fee; creator gets the other 50%)
 // solscanTxUrl(sig, cluster?) / solscanAccountUrl(addr, cluster?)  cluster default "devnet"
 ```
 
