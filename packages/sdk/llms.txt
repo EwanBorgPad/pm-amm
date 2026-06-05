@@ -3,7 +3,7 @@
 > Machine-readable, complete API surface for the pm-AMM Solana SDK. Optimized
 > for coding agents (Claude, Codex, …) to generate correct integration code
 > WITHOUT reading the source. Every public symbol, signature, and type is here.
-> Narrative quickstart: README.md. Human visual guide: the app's `/docs` route.
+> Narrative quickstart: README.md. **Most complete reference** (the 26 on-chain instructions + SDK + math + end-to-end recipes): `doc/api-reference.md` in the repo, also served at `/api-reference.md`. Human visual guide: the app's `/docs` route.
 
 pm-AMM is a faithful implementation of the Paradigm pm-AMM (Moallemi & Robinson, 2024):
 prediction-market AMM with time-decaying liquidity `L_eff = L0*sqrt(T-t)` (uniform LVR),
