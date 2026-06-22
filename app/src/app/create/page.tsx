@@ -8,8 +8,11 @@ import { Button } from "@/components/ui/button";
 import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useClient } from "@/lib/pm-amm-client";
-import { solscanTxUrl } from "@/lib/constants";
-import { formatUsdc, expectedDailyLvr, poolValue, phi, phiInv } from "@pm-amm/sdk/math";
+import { TokenPicker } from "@/components/ui/token-picker";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { solscanTxUrl, USDC_MINT } from "@/lib/constants";
+import { formatAmount, expectedDailyLvr, poolValue, phi, phiInv } from "@pm-amm/sdk/math";
+import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -21,10 +24,14 @@ export default function CreateMarketPage() {
   // Initial YES price in percent (0..100). 50 = legacy default (5000 bps).
   // Sent on-chain as basis points (5000 = 50%).
   const [initialPricePct, setInitialPricePct] = useState("50");
+  const [collateralMint, setCollateralMint] = useState(USDC_MINT.toBase58());
   const [loading, setLoading] = useState(false);
   const client = useClient();
   const { publicKey } = useWallet();
   const router = useRouter();
+  const collat = useTokenInfo(collateralMint);
+  const decimals = collat.data?.decimals ?? 6;
+  const symbol = collat.data?.symbol ?? "USDC";
 
   // --- Computed values for simulation ---
   const durNum = parseFloat(durationValue) || 0;
@@ -35,7 +42,7 @@ export default function CreateMarketPage() {
         ? durNum * 3600
         : durNum * 86400;
   const liquidity = parseFloat(initialLiquidity) || 0;
-  const liqLamports = liquidity * 1e6;
+  const liqLamports = liquidity * 10 ** decimals;
 
   // Mirror pm_math::suggest_l_zero_at_price: L_eff = budget / phi(Phi_inv(P)).
   // Collapses to budget / phi(0) when seedPrice = 0.5.
@@ -65,10 +72,11 @@ export default function CreateMarketPage() {
         durationSecs: Math.floor(durSeconds),
         initialPriceBps,
         depositUsdc: liquidity > 0 ? liquidity : undefined,
+        collateralMint: new PublicKey(collateralMint),
       });
       toast.success("Market created", {
         description:
-          liquidity > 0 ? `ID: ${marketId} · Deposited ${liquidity} USDC` : `ID: ${marketId}`,
+          liquidity > 0 ? `ID: ${marketId} · Deposited ${liquidity} ${symbol}` : `ID: ${marketId}`,
         action: {
           label: "Solscan ↗",
           onClick: () => window.open(solscanTxUrl(signature), "_blank"),
@@ -199,10 +207,13 @@ export default function CreateMarketPage() {
               />
             </div>
 
+            {/* Collateral token (any SPL token, any decimals) */}
+            <TokenPicker value={collateralMint} onChange={setCollateralMint} />
+
             {/* Initial Liquidity */}
             <AmountInput
               label="INITIAL LIQUIDITY"
-              unit="USDC"
+              unit={symbol}
               type="number"
               placeholder="100"
               value={initialLiquidity}
@@ -279,10 +290,19 @@ export default function CreateMarketPage() {
 
             {liquidity > 0 && durSeconds > 0 ? (
               <>
-                <MetaRow label="Pool Value" value={`$${formatUsdc(pv)}`} />
-                <MetaRow label="Daily LVR cost" value={`$${formatUsdc(dailyLvr)}`} />
-                <MetaRow label="Expected return" value={`~$${formatUsdc(expectedReturn)}`} />
-                <MetaRow label="Expected loss (LVR)" value={`~$${formatUsdc(expectedLoss)}`} />
+                <MetaRow label="Pool Value" value={formatAmount(pv, decimals, { symbol })} />
+                <MetaRow
+                  label="Daily LVR cost"
+                  value={formatAmount(dailyLvr, decimals, { symbol })}
+                />
+                <MetaRow
+                  label="Expected return"
+                  value={`~${formatAmount(expectedReturn, decimals, { symbol })}`}
+                />
+                <MetaRow
+                  label="Expected loss (LVR)"
+                  value={`~${formatAmount(expectedLoss, decimals, { symbol })}`}
+                />
                 <MetaRow label="Return %" value="-50.0%" last />
 
                 {/* Visual bar */}
