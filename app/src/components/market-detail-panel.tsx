@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { usePositionValue } from "@/hooks/use-position-value";
 import { useLpPosition } from "@/hooks/use-lp-position";
-import { formatUsdc, poolValue, lpPositionPnl } from "@pm-amm/sdk/math";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { formatAmount, poolValue, lpPositionPnl } from "@pm-amm/sdk/math";
 import { Countdown } from "@/components/ui/countdown";
 import type { MarketData } from "@/hooks/use-markets";
 import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
-import { PROGRAM_ID, USDC_MINT, solscanAccountUrl } from "@/lib/constants";
+import { PROGRAM_ID, solscanAccountUrl } from "@/lib/constants";
 import { PublicKey } from "@solana/web3.js";
 import Link from "next/link";
 
@@ -20,6 +21,10 @@ function truncateKey(key: string): string {
 }
 
 export function MarketDetailPanel({ market }: { market: MarketData }) {
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
+
   const pv = market.lEff > 0 ? poolValue(market.price, market.lEff) : 0;
   const yesP = market.price * 100;
 
@@ -27,7 +32,7 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
   const yesMint = deriveYesMint(PROGRAM_ID, marketPda).toBase58();
   const noMint = deriveNoMint(PROGRAM_ID, marketPda).toBase58();
 
-  const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
+  const { data: tokens } = useUserTokens(yesMint, noMint, market.collateralMint);
   const { data: posValue } = usePositionValue(market.publicKey, tokens ?? null);
   const { data: lp } = useLpPosition(market.publicKey);
 
@@ -86,7 +91,7 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
       <ProbabilityBar yesPercent={yesP} className="mb-[16px]" />
 
       {/* Market meta */}
-      <MetaRow label="TVL" value={`$${formatUsdc(pv)}`} />
+      <MetaRow label="TVL" value={formatAmount(pv, decimals, { symbol })} />
       <MetaRow label="Expires" value={<Countdown endTs={market.endTs} />} />
       <MetaRow label="Address" value={truncateKey(market.publicKey)} last />
 
@@ -100,13 +105,17 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
             {(tokens?.yes ?? 0) > 0 && (
               <div className="p-[8px] border border-line rounded-sm">
                 <div className="text-[9px] text-yes uppercase tracking-[0.08em] mb-[4px]">YES</div>
-                <div className="text-[16px] text-yes tnum">{formatUsdc(tokens!.yes)}</div>
+                <div className="text-[16px] text-yes tnum">
+                  {formatAmount(tokens!.yes, decimals, { symbol })}
+                </div>
               </div>
             )}
             {(tokens?.no ?? 0) > 0 && (
               <div className="p-[8px] border border-line rounded-sm">
                 <div className="text-[9px] text-no uppercase tracking-[0.08em] mb-[4px]">NO</div>
-                <div className="text-[16px] text-no tnum">{formatUsdc(tokens!.no)}</div>
+                <div className="text-[16px] text-no tnum">
+                  {formatAmount(tokens!.no, decimals, { symbol })}
+                </div>
               </div>
             )}
           </div>
@@ -127,11 +136,15 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
                     label={`If ${side} wins`}
                     value={
                       <span className="text-yes">
-                        {formatUsdc(payout)} USDC (+{returnPct.toFixed(0)}%)
+                        {formatAmount(payout, decimals, { symbol })} (+{returnPct.toFixed(0)}%)
                       </span>
                     }
                   />
-                  <MetaRow label="Sell now" value={`${formatUsdc(sellNow)} USDC`} last />
+                  <MetaRow
+                    label="Sell now"
+                    value={formatAmount(sellNow, decimals, { symbol })}
+                    last
+                  />
                 </>
               );
             })()}
@@ -144,7 +157,10 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
           <div className="text-[10px] text-muted uppercase tracking-[0.08em] mt-[20px] mb-[8px]">
             YOUR LP
           </div>
-          <MetaRow label="Deposited" value={`$${formatUsdc(lp.collateralDeposited)}`} />
+          <MetaRow
+            label="Deposited"
+            value={formatAmount(lp.collateralDeposited, decimals, { symbol })}
+          />
           <MetaRow label="Pool share" value={`${lpPnl?.poolSharePct.toFixed(1)}%`} />
           {lpPnl &&
             (() => {
@@ -157,7 +173,8 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
                     label="If YES wins"
                     value={
                       <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
-                        ${formatUsdc(lpPnl.ifYesWins)} ({yesPnl >= 0 ? "+" : ""}
+                        {formatAmount(lpPnl.ifYesWins, decimals, { symbol })} (
+                        {yesPnl >= 0 ? "+" : ""}
                         {yesPnl.toFixed(0)}%)
                       </span>
                     }
@@ -166,7 +183,8 @@ export function MarketDetailPanel({ market }: { market: MarketData }) {
                     label="If NO wins"
                     value={
                       <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
-                        ${formatUsdc(lpPnl.ifNoWins)} ({noPnl >= 0 ? "+" : ""}
+                        {formatAmount(lpPnl.ifNoWins, decimals, { symbol })} (
+                        {noPnl >= 0 ? "+" : ""}
                         {noPnl.toFixed(0)}%)
                       </span>
                     }

@@ -8,7 +8,8 @@ import { Figure } from "@/components/ui/figure";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useClient } from "@/lib/pm-amm-client";
 import { usePositionValue } from "@/hooks/use-position-value";
-import { formatUsdc } from "@pm-amm/sdk/math";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { formatAmount } from "@pm-amm/sdk/math";
 import type { MarketData } from "@/hooks/use-markets";
 import type { UserTokens } from "@/hooks/use-user-tokens";
 import { solscanTxUrl } from "@/lib/constants";
@@ -25,6 +26,9 @@ export function PositionCard({
   const client = useClient();
   const { publicKey } = useWallet();
   const { data: posValue, isLoading: valueLoading } = usePositionValue(market.publicKey, tokens);
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
 
   if (!publicKey) return null;
 
@@ -43,7 +47,7 @@ export function PositionCard({
     try {
       // redeemable is in raw 6-dp micro-units (min of YES/NO balances).
       const tx = await client.send.redeemPair(new PublicKey(market.publicKey), redeemable);
-      toast.success(`Redeemed ${formatUsdc(redeemable)} USDC`, {
+      toast.success(`Redeemed ${formatAmount(redeemable, decimals, { symbol })}`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });
     } catch (err: unknown) {
@@ -65,11 +69,11 @@ export function PositionCard({
     try {
       // send.claimWinnings ensures YES/NO/USDC ATAs + CU; settles everything on-chain.
       const tx = await client.send.claimWinnings(new PublicKey(market.publicKey));
-      const payout = winningBalance > 0 ? formatUsdc(winningBalance) : "0";
-      const burned = losingBalance > 0 ? formatUsdc(losingBalance) : "0";
+      const payout = winningBalance > 0 ? formatAmount(winningBalance, decimals, { symbol }) : "0";
+      const burned = losingBalance > 0 ? formatAmount(losingBalance, decimals) : "0";
       toast.success(
         winningBalance > 0
-          ? `Claimed ${payout} USDC + burned ${burned} losing tokens`
+          ? `Claimed ${payout} + burned ${burned} losing tokens`
           : `Burned ${burned} losing tokens`,
         { action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") } },
       );
@@ -89,19 +93,32 @@ export function PositionCard({
     <div className="border border-line p-[16px] space-y-[12px]">
       <div className="text-caption">YOUR POSITION</div>
 
-      <MetaRow label="USDC Balance" value={`${formatUsdc(usdcBalance)} USDC`} last={!hasPosition} />
+      <MetaRow
+        label={`${symbol} Balance`}
+        value={formatAmount(usdcBalance, decimals, { symbol })}
+        last={!hasPosition}
+      />
 
       {market.resolved ? (
         /* === RESOLVED === */
         hasPosition ? (
           <div className="space-y-[12px]">
             <div className="flex gap-[32px]">
-              <Figure label="YES" value={formatUsdc(yesAmount)} size="data" color="yes" />
-              <Figure label="NO" value={formatUsdc(noAmount)} size="data" color="no" />
+              <Figure
+                label="YES"
+                value={formatAmount(yesAmount, decimals)}
+                size="data"
+                color="yes"
+              />
+              <Figure label="NO" value={formatAmount(noAmount, decimals)} size="data" color="no" />
             </div>
 
             {winningBalance > 0 && (
-              <MetaRow label="Payout" value={`${formatUsdc(winningBalance)} USDC`} last />
+              <MetaRow
+                label="Payout"
+                value={formatAmount(winningBalance, decimals, { symbol })}
+                last
+              />
             )}
 
             <Button
@@ -113,7 +130,7 @@ export function PositionCard({
               {loading
                 ? "SETTLING..."
                 : winningBalance > 0
-                  ? `Settle — ${formatUsdc(winningBalance)} USDC`
+                  ? `Settle — ${formatAmount(winningBalance, decimals, { symbol })}`
                   : "Settle — clean up tokens"}
             </Button>
           </div>
@@ -124,8 +141,8 @@ export function PositionCard({
       hasPosition ? (
         <>
           <div className="flex gap-[32px]">
-            <Figure label="YES" value={formatUsdc(yesAmount)} size="data" color="yes" />
-            <Figure label="NO" value={formatUsdc(noAmount)} size="data" color="no" />
+            <Figure label="YES" value={formatAmount(yesAmount, decimals)} size="data" color="yes" />
+            <Figure label="NO" value={formatAmount(noAmount, decimals)} size="data" color="no" />
           </div>
 
           <div className="border-t border-line pt-[8px]">
@@ -136,32 +153,53 @@ export function PositionCard({
             ) : posValue ? (
               <>
                 {yesAmount > 0 && (
-                  <MetaRow label="YES → USDC" value={formatUsdc(posValue.yesValueUsdc)} />
+                  <MetaRow
+                    label={`YES → ${symbol}`}
+                    value={formatAmount(posValue.yesValueUsdc, decimals, { symbol })}
+                  />
                 )}
                 {noAmount > 0 && (
-                  <MetaRow label="NO → USDC" value={formatUsdc(posValue.noValueUsdc)} />
+                  <MetaRow
+                    label={`NO → ${symbol}`}
+                    value={formatAmount(posValue.noValueUsdc, decimals, { symbol })}
+                  />
                 )}
-                <MetaRow label="Sell now" value={`${formatUsdc(posValue.totalUsdc)} USDC`} />
+                <MetaRow
+                  label="Sell now"
+                  value={formatAmount(posValue.totalUsdc, decimals, { symbol })}
+                />
                 {yesAmount > 0 && (
                   <MetaRow
                     label="If YES wins"
-                    value={<span className="text-yes">+{formatUsdc(yesAmount)} USDC</span>}
+                    value={
+                      <span className="text-yes">
+                        +{formatAmount(yesAmount, decimals, { symbol })}
+                      </span>
+                    }
                   />
                 )}
                 {noAmount > 0 && (
                   <MetaRow
                     label="If NO wins"
-                    value={<span className="text-no">+{formatUsdc(noAmount)} USDC</span>}
+                    value={
+                      <span className="text-no">
+                        +{formatAmount(noAmount, decimals, { symbol })}
+                      </span>
+                    }
                     last
                   />
                 )}
                 {yesAmount > 0 && noAmount === 0 && (
-                  <MetaRow label="If NO wins" value={<span className="text-no">$0.00</span>} last />
+                  <MetaRow
+                    label="If NO wins"
+                    value={<span className="text-no">{formatAmount(0, decimals, { symbol })}</span>}
+                    last
+                  />
                 )}
                 {noAmount > 0 && yesAmount === 0 && (
                   <MetaRow
                     label="If YES wins"
-                    value={<span className="text-no">$0.00</span>}
+                    value={<span className="text-no">{formatAmount(0, decimals, { symbol })}</span>}
                     last
                   />
                 )}
@@ -176,7 +214,7 @@ export function PositionCard({
               onClick={handleRedeem}
               disabled={loading}
             >
-              Redeem {formatUsdc(redeemable)} pairs
+              Redeem {formatAmount(redeemable, decimals)} pairs
             </Button>
           )}
         </>

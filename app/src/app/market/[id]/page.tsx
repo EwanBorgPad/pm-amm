@@ -14,10 +14,11 @@ import { Badge } from "@/components/ui/badge";
 import { useMarkets } from "@/hooks/use-markets";
 import { usePriceRecorder } from "@/hooks/use-price-recorder";
 import { useUserTokens } from "@/hooks/use-user-tokens";
-import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { formatAmount, poolValue } from "@pm-amm/sdk/math";
 import { Countdown } from "@/components/ui/countdown";
 import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
-import { PROGRAM_ID, USDC_MINT, solscanAccountUrl } from "@/lib/constants";
+import { PROGRAM_ID, solscanAccountUrl } from "@/lib/constants";
 import { PublicKey } from "@solana/web3.js";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -31,11 +32,15 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
   usePriceRecorder(markets);
   const market = markets?.find((m) => m.marketId === Number(id));
 
+  const tok = useTokenInfo(market?.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
+
   const marketPda = market ? new PublicKey(market.publicKey) : undefined;
   const yesMint = marketPda ? deriveYesMint(PROGRAM_ID, marketPda).toBase58() : undefined;
   const noMint = marketPda ? deriveNoMint(PROGRAM_ID, marketPda).toBase58() : undefined;
 
-  const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
+  const { data: tokens } = useUserTokens(yesMint, noMint, market?.collateralMint);
   const name = market?.name ?? `Market #${id}`;
 
   return (
@@ -216,7 +221,9 @@ export default function MarketPage({ params }: { params: Promise<{ id: string }>
                     <div className="max-w-md">
                       <MetaRow
                         label="Pool Value"
-                        value={`$${formatUsdc(poolValue(market.price, market.lEff))}`}
+                        value={formatAmount(poolValue(market.price, market.lEff), decimals, {
+                          symbol,
+                        })}
                       />
                       <MetaRow label="Expires" value={<Countdown endTs={market.endTs} />} last />
                     </div>

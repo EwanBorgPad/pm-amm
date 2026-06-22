@@ -9,7 +9,8 @@ import { AmountInput } from "@/components/ui/amount-input";
 import { MetaRow } from "@/components/ui/meta-row";
 import { useClient } from "@/lib/pm-amm-client";
 import { useLpPosition } from "@/hooks/use-lp-position";
-import { formatUsdc } from "@pm-amm/sdk/math";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { formatAmount } from "@pm-amm/sdk/math";
 import type { MarketData } from "@/hooks/use-markets";
 import { solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
@@ -20,6 +21,9 @@ export function LpPanel({ market }: { market: MarketData }) {
   const client = useClient();
   const { publicKey } = useWallet();
   const { data: lp } = useLpPosition(market.publicKey);
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
 
   const marketPda = new PublicKey(market.publicKey);
 
@@ -27,9 +31,9 @@ export function LpPanel({ market }: { market: MarketData }) {
     if (!client || !publicKey || !depositAmt) return;
     setLoading(true);
     try {
-      // send.depositLiquidity takes human USDC, ensures the USDC ATA, sets CU.
+      // send.depositLiquidity takes human collateral, ensures the ATA, sets CU.
       const tx = await client.send.depositLiquidity(marketPda, parseFloat(depositAmt));
-      toast.success(`Deposited ${depositAmt} USDC`, {
+      toast.success(`Deposited ${depositAmt} ${symbol}`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });
       setDepositAmt("");
@@ -78,7 +82,11 @@ export function LpPanel({ market }: { market: MarketData }) {
       {lp && lp.shares > 0 && (
         <div className="border-b border-line pb-[8px]">
           <MetaRow label="Your shares" value={lp.shares.toFixed(2)} />
-          <MetaRow label="Deposited" value={`$${formatUsdc(lp.collateralDeposited)}`} last />
+          <MetaRow
+            label="Deposited"
+            value={formatAmount(lp.collateralDeposited, decimals, { symbol })}
+            last
+          />
         </div>
       )}
 

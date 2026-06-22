@@ -12,11 +12,12 @@ import { ResidualsWidget } from "@/components/residuals-widget";
 import { useMarkets } from "@/hooks/use-markets";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { useLpPosition } from "@/hooks/use-lp-position";
+import { useTokenInfo } from "@/hooks/use-token-info";
 import { useClient } from "@/lib/pm-amm-client";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  formatUsdc,
+  formatAmount,
   poolValue,
   expectedDailyLvr,
   simulateLpDeposit,
@@ -24,7 +25,7 @@ import {
   formatTimeRemaining,
 } from "@pm-amm/sdk/math";
 import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
-import { PROGRAM_ID, USDC_MINT, solscanTxUrl } from "@/lib/constants";
+import { PROGRAM_ID, solscanTxUrl } from "@/lib/constants";
 import { PublicKey } from "@solana/web3.js";
 import { BN } from "@anchor-lang/core";
 import { toast } from "sonner";
@@ -35,11 +36,15 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
   const { data: markets, isLoading } = useMarkets();
   const market = markets?.find((m) => m.marketId === Number(id));
 
+  const tok = useTokenInfo(market?.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
+
   const marketPda = market ? new PublicKey(market.publicKey) : undefined;
   const yesMint = marketPda ? deriveYesMint(PROGRAM_ID, marketPda).toBase58() : undefined;
   const noMint = marketPda ? deriveNoMint(PROGRAM_ID, marketPda).toBase58() : undefined;
 
-  const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
+  const { data: tokens } = useUserTokens(yesMint, noMint, market?.collateralMint);
   const { data: lp } = useLpPosition(market?.publicKey);
   const client = useClient();
   const { publicKey } = useWallet();
@@ -82,7 +87,7 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
   const depositSim =
     market && depositNum > 0
       ? simulateLpDeposit(
-          depositNum * 1e6,
+          depositNum * 10 ** decimals,
           market.price,
           market.lEff,
           market.totalLpShares,
@@ -98,7 +103,7 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
     try {
       const tx = await client.send.depositLiquidity(new PublicKey(market.publicKey), depositNum);
 
-      toast.success(`Deposited ${depositNum} USDC`, {
+      toast.success(`Deposited ${depositNum} ${symbol}`, {
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
       });
       setDepositAmt("");
@@ -178,7 +183,11 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
             <div className="border border-line p-[16px] space-y-[12px]">
               <div className="text-caption">POOL OVERVIEW</div>
               <div className="flex gap-[32px] flex-wrap">
-                <Figure label="Pool Value" value={`$${formatUsdc(pv)}`} size="data" />
+                <Figure
+                  label="Pool Value"
+                  value={formatAmount(pv, decimals, { symbol })}
+                  size="data"
+                />
                 <Figure label="YES Price" value={market.price.toFixed(4)} size="data" color="yes" />
                 <Figure
                   label="NO Price"
@@ -190,7 +199,11 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
               <MetaRow label="Total LP Shares" value={market.totalLpShares.toFixed(2)} />
               <MetaRow label="L_0" value={market.lZero.toFixed(6)} />
               <MetaRow label="L_eff" value={market.lEff.toFixed(2)} />
-              <MetaRow label="Expected Daily LVR" value={`$${formatUsdc(dailyLvr)}`} last />
+              <MetaRow
+                label="Expected Daily LVR"
+                value={formatAmount(dailyLvr, decimals, { symbol })}
+                last
+              />
             </div>
 
             {/* LP Economics */}
@@ -223,7 +236,7 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                       const evPct = ((ev - lp.collateralDeposited) / lp.collateralDeposited) * 100;
                       return (
                         <span className={evPct >= 0 ? "text-yes" : "text-no"}>
-                          ${formatUsdc(ev)} ({evPct >= 0 ? "+" : ""}
+                          {formatAmount(ev, decimals, { symbol })} ({evPct >= 0 ? "+" : ""}
                           {evPct.toFixed(1)}%)
                         </span>
                       );
@@ -238,16 +251,22 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
             {lp && lp.shares > 0 && posData && (
               <div className="border border-line p-[16px] space-y-[12px]">
                 <div className="text-caption">YOUR LP POSITION</div>
-                <MetaRow label="Deposited" value={`$${formatUsdc(lp.collateralDeposited)}`} />
+                <MetaRow
+                  label="Deposited"
+                  value={formatAmount(lp.collateralDeposited, decimals, { symbol })}
+                />
                 <MetaRow label="Pool Share" value={`${posData.poolSharePct.toFixed(2)}%`} />
-                <MetaRow label="Still in pool" value={`$${formatUsdc(posData.poolValue)}`} />
+                <MetaRow
+                  label="Still in pool"
+                  value={formatAmount(posData.poolValue, decimals, { symbol })}
+                />
                 <MetaRow
                   label="YES tokens (pending+wallet)"
-                  value={`${formatUsdc(posData.totalYes)}`}
+                  value={formatAmount(posData.totalYes, decimals, { symbol })}
                 />
                 <MetaRow
                   label="NO tokens (pending+wallet)"
-                  value={`${formatUsdc(posData.totalNo)}`}
+                  value={formatAmount(posData.totalNo, decimals, { symbol })}
                 />
 
                 <div className="border-t border-line pt-[8px] mt-[8px]">
@@ -266,7 +285,8 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                           label="If YES wins"
                           value={
                             <span className={yesPnl >= 0 ? "text-yes" : "text-no"}>
-                              ${formatUsdc(yesReturn)} ({yesPnl >= 0 ? "+" : ""}
+                              {formatAmount(yesReturn, decimals, { symbol })} (
+                              {yesPnl >= 0 ? "+" : ""}
                               {yesPnl.toFixed(1)}%)
                             </span>
                           }
@@ -275,7 +295,8 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                           label="If NO wins"
                           value={
                             <span className={noPnl >= 0 ? "text-yes" : "text-no"}>
-                              ${formatUsdc(noReturn)} ({noPnl >= 0 ? "+" : ""}
+                              {formatAmount(noReturn, decimals, { symbol })} (
+                              {noPnl >= 0 ? "+" : ""}
                               {noPnl.toFixed(1)}%)
                             </span>
                           }
@@ -308,7 +329,7 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                 <div className="flex gap-[8px]">
                   <AmountInput
                     placeholder="0.00"
-                    unit="USDC"
+                    unit={symbol}
                     value={depositAmt}
                     onChange={(e) => setDepositAmt(e.target.value)}
                     type="number"
@@ -339,11 +360,13 @@ export default function LpPage({ params }: { params: Promise<{ id: string }> }) 
                     />
                     <MetaRow
                       label="Est. daily yield (dC_t)"
-                      value={`$${formatUsdc(depositSim.estDailyYield)}`}
+                      value={formatAmount(depositSim.estDailyYield, decimals, { symbol })}
                     />
                     <MetaRow
                       label="Expected at expiry"
-                      value={`~$${formatUsdc((depositNum * 1e6) / 2)}`}
+                      value={`~${formatAmount((depositNum * 10 ** decimals) / 2, decimals, {
+                        symbol,
+                      })}`}
                       last
                     />
                     <p className="text-[10px] text-muted/60 font-mono pt-[4px]">
