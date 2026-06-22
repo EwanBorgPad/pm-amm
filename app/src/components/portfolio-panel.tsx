@@ -11,8 +11,9 @@ import { useMarkets, type MarketData } from "@/hooks/use-markets";
 import { useUserTokens } from "@/hooks/use-user-tokens";
 import { useLpPosition } from "@/hooks/use-lp-position";
 import { useClient } from "@/lib/pm-amm-client";
-import { formatUsdc, lpPositionPnl } from "@pm-amm/sdk/math";
+import { formatUsdc, formatAmount, lpPositionPnl } from "@pm-amm/sdk/math";
 import { deriveYesMint, deriveNoMint } from "@pm-amm/sdk";
+import { useTokenInfo } from "@/hooks/use-token-info";
 import { PROGRAM_ID, USDC_MINT, solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -42,7 +43,10 @@ function TradePosition({ market }: { market: MarketData }) {
   const marketPda = new PublicKey(market.publicKey);
   const yesMint = deriveYesMint(PROGRAM_ID, marketPda).toBase58();
   const noMint = deriveNoMint(PROGRAM_ID, marketPda).toBase58();
-  const { data: tokens } = useUserTokens(yesMint, noMint, USDC_MINT.toBase58());
+  const { data: tokens } = useUserTokens(yesMint, noMint, market.collateralMint);
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
 
   const yesAmt = tokens?.yes ?? 0;
   const noAmt = tokens?.no ?? 0;
@@ -63,11 +67,13 @@ function TradePosition({ market }: { market: MarketData }) {
     >
       <div className="flex justify-between items-baseline mb-[4px]">
         <span className="font-sans text-[12px] text-text-hi truncate mr-[8px]">{market.name}</span>
-        <span className="text-[11px] tnum text-text-dim shrink-0">~{formatUsdc(estValue)}</span>
+        <span className="text-[11px] tnum text-text-dim shrink-0">
+          ~{formatAmount(estValue, decimals, { symbol })}
+        </span>
       </div>
       <div className="flex gap-[12px] text-[10px]">
-        {yesAmt > 0 && <span className="text-yes tnum">{formatUsdc(yesAmt)} YES</span>}
-        {noAmt > 0 && <span className="text-no tnum">{formatUsdc(noAmt)} NO</span>}
+        {yesAmt > 0 && <span className="text-yes tnum">{formatAmount(yesAmt, decimals)} YES</span>}
+        {noAmt > 0 && <span className="text-no tnum">{formatAmount(noAmt, decimals)} NO</span>}
       </div>
     </Link>
   );
@@ -78,7 +84,10 @@ function LpPositionRow({ market }: { market: MarketData }) {
   const marketPdaLp = new PublicKey(market.publicKey);
   const yMint = deriveYesMint(PROGRAM_ID, marketPdaLp).toBase58();
   const nMint = deriveNoMint(PROGRAM_ID, marketPdaLp).toBase58();
-  const { data: lpTokens } = useUserTokens(yMint, nMint, USDC_MINT.toBase58());
+  const { data: lpTokens } = useUserTokens(yMint, nMint, market.collateralMint);
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
   if (!lp || lp.shares <= 0) return null;
 
   const pos = lpPositionPnl(
@@ -106,12 +115,12 @@ function LpPositionRow({ market }: { market: MarketData }) {
         <span className="font-sans text-[12px] text-text-hi truncate mr-[8px]">{market.name}</span>
         <span className={`text-[11px] tnum shrink-0 ${pos.pnl >= 0 ? "text-yes" : "text-no"}`}>
           {pos.pnl >= 0 ? "+" : ""}
-          {formatUsdc(Math.abs(pos.pnl))}
+          {formatAmount(Math.abs(pos.pnl), decimals, { symbol })}
         </span>
       </div>
       <div className="flex gap-[12px] text-[10px] text-muted">
         <span>Pool {pos.poolSharePct.toFixed(1)}%</span>
-        <span>{formatUsdc(lp.collateralDeposited)} deposited</span>
+        <span>{formatAmount(lp.collateralDeposited, decimals, { symbol })} deposited</span>
       </div>
     </Link>
   );

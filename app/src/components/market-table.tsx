@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Sparkline } from "@/components/ui/sparkline";
 import { Countdown } from "@/components/ui/countdown";
-import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
+import { formatAmount, poolValue } from "@pm-amm/sdk/math";
+import { findToken } from "@/lib/tokens";
 import type { MarketData } from "@/hooks/use-markets";
 import type { GroupData } from "@/hooks/use-groups";
 
@@ -77,6 +78,7 @@ export function MarketTable({ items, selectedId, onSelect, priceHistories }: Mar
           const isResolved = m.resolved;
           const isSelected = selectedId === m.publicKey;
           const pv = m.lEff > 0 ? poolValue(m.price, m.lEff) : 0;
+          const tk = findToken(m.collateralMint);
           const yesP = Math.round(m.price * 100);
           const noP = 100 - yesP;
 
@@ -121,7 +123,9 @@ export function MarketTable({ items, selectedId, onSelect, priceHistories }: Mar
                 <span className="text-no text-[11px] tnum w-[32px]">{noP}%</span>
               </div>
 
-              <div className="text-right tnum text-text">${formatUsdc(pv)}</div>
+              <div className="text-right tnum text-text">
+                {formatAmount(pv, tk?.decimals ?? 6, { symbol: tk?.symbol ?? "" })}
+              </div>
               <div className="text-right text-[11px]">
                 <Countdown endTs={m.endTs} />
               </div>
@@ -139,6 +143,7 @@ export function MarketTable({ items, selectedId, onSelect, priceHistories }: Mar
         const status = getGroupStatus(g);
         const isResolved = g.resolved;
         const pv = groupTvl(g);
+        const gtk = findToken(g.legs.find((l) => l)?.collateralMint ?? "");
         // Top leg = highest implied probability across the attached legs.
         // For a freshly-launched vault group, all legs share the same price
         // until trading starts.
@@ -185,7 +190,9 @@ export function MarketTable({ items, selectedId, onSelect, priceHistories }: Mar
               )}
             </div>
 
-            <div className="text-right tnum text-text">${formatUsdc(pv)}</div>
+            <div className="text-right tnum text-text">
+              {formatAmount(pv, gtk?.decimals ?? 6, { symbol: gtk?.symbol ?? "" })}
+            </div>
             <div className="text-right text-[11px]">
               <Countdown endTs={g.endTs} />
             </div>

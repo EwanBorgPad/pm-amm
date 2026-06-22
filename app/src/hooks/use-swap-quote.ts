@@ -39,17 +39,26 @@ export function useSwapQuote(
   mode: SwapMode,
   amount: number,
   reserves?: MarketReserves,
+  collateralMint?: string,
 ) {
   const { connection } = useConnection();
   const { publicKey } = useWallet();
 
   return useQuery<SwapQuote | null>({
-    queryKey: ["swap-quote", marketPda, side, mode, amount],
+    queryKey: ["swap-quote", marketPda, side, mode, amount, collateralMint],
     queryFn: async () => {
       if (!publicKey || !marketPda || amount <= 0) return null;
 
       // Try on-chain simulation first
-      const onChain = await tryOnChainQuote(connection, publicKey, marketPda, side, mode, amount);
+      const onChain = await tryOnChainQuote(
+        connection,
+        publicKey,
+        marketPda,
+        side,
+        mode,
+        amount,
+        collateralMint,
+      );
       if (onChain) return onChain;
 
       // Fallback: client-side estimation using pm-AMM math
@@ -72,7 +81,8 @@ function clientSideQuote(
   mode: SwapMode,
   amount: number,
 ): SwapQuote {
-  const lamports = mode === "buy" ? Math.floor(amount * 1e6) : Math.floor(amount);
+  // `amount` is already raw base units (collateral / YES / NO share decimals).
+  const lamports = Math.floor(amount);
   // 2% protocol fee on the USDC leg: skimmed off the INPUT on a buy (only the
   // net trades the curve) and off the OUTPUT on a sell. Must match the program
   // so the slippage `minOutput` derived from this quote isn't over-stated.
@@ -111,14 +121,16 @@ async function tryOnChainQuote(
   side: "yes" | "no",
   mode: SwapMode,
   amount: number,
+  collateralMint?: string,
 ): Promise<SwapQuote | null> {
   try {
     const market = new PublicKey(marketPda);
     const client = getClient(connection);
     const yesMint = client.yesMint(market);
     const noMint = client.noMint(market);
+    const collatMint = collateralMint ? new PublicKey(collateralMint) : USDC_MINT;
 
-    const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+    const userUsdc = await getAssociatedTokenAddress(collatMint, publicKey);
     const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
     const userNo = await getAssociatedTokenAddress(noMint, publicKey);
 
@@ -128,7 +140,7 @@ async function tryOnChainQuote(
     const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
     const ataIxs: TransactionInstruction[] = [];
     for (const { ata, mint } of [
-      { ata: userUsdc, mint: USDC_MINT },
+      { ata: userUsdc, mint: collatMint },
       { ata: userYes, mint: yesMint },
       { ata: userNo, mint: noMint },
     ]) {
@@ -141,10 +153,10 @@ async function tryOnChainQuote(
     // missing required account. We quote with creatorUsdc=null (signer treated
     // as creator) — the output is identical either way, and it avoids a market
     // fetch + a possibly-missing creator ATA on every keystroke.
-    const daoUsdc = await getAssociatedTokenAddress(USDC_MINT, PROTOCOL_DAO, true);
+    const daoUsdc = await getAssociatedTokenAddress(collatMint, PROTOCOL_DAO, true);
     if (!(await connection.getAccountInfo(daoUsdc))) {
       ataIxs.push(
-        createAssociatedTokenAccountInstruction(publicKey, daoUsdc, PROTOCOL_DAO, USDC_MINT),
+        createAssociatedTokenAccountInstruction(publicKey, daoUsdc, PROTOCOL_DAO, collatMint),
       );
     }
 
@@ -169,7 +181,7 @@ async function tryOnChainQuote(
           ? "yesToUsdc"
           : "noToUsdc";
 
-    const lamports = mode === "buy" ? Math.floor(amount * 1e6) : Math.floor(amount);
+    const lamports = Math.floor(amount);
 
     const ix = await client.ix.swap({
       signer: publicKey,
@@ -178,6 +190,7 @@ async function tryOnChainQuote(
       amountIn: lamports,
       minOutput: 0,
       creatorAuthority: publicKey, // quote with creatorUsdc=null (output is identical)
+      collateralMint: collatMint,
     });
 
     const tx = new Transaction().add(

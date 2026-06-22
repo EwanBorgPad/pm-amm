@@ -8,7 +8,8 @@ import { MetaRow } from "@/components/ui/meta-row";
 import { useQueryClient } from "@tanstack/react-query";
 import { useClient } from "@/lib/pm-amm-client";
 import { useSwapQuote, type SwapMode } from "@/hooks/use-swap-quote";
-import { formatUsdc } from "@pm-amm/sdk/math";
+import { useTokenInfo } from "@/hooks/use-token-info";
+import { formatAmount } from "@pm-amm/sdk/math";
 import type { SwapDirection } from "@pm-amm/sdk";
 import { PROTOCOL_DAO } from "@pm-amm/sdk";
 import type { MarketData } from "@/hooks/use-markets";
@@ -20,7 +21,7 @@ import {
   createCloseAccountInstruction,
   getAccount,
 } from "@solana/spl-token";
-import { USDC_MINT, solscanTxUrl } from "@/lib/constants";
+import { solscanTxUrl } from "@/lib/constants";
 import { toast } from "sonner";
 
 const SLIPPAGE_BPS = 100;
@@ -55,10 +56,19 @@ export function TradePanel({
   const client = useClient();
   const { publicKey } = useWallet();
 
+  // Per-market collateral token. YES/NO mints inherit the collateral's decimals,
+  // so a SINGLE `decimals` (and `ONE`) governs every amount in this market.
+  const tok = useTokenInfo(market.collateralMint);
+  const decimals = tok.data?.decimals ?? 6;
+  const symbol = tok.data?.symbol ?? "USDC";
+  const ONE = 10 ** decimals;
+
   const amountNum = parseFloat(amount) || 0;
   const maxSellable = side === "yes" ? (tokens?.yes ?? 0) : (tokens?.no ?? 0);
-  const sellExceeds = mode === "sell" && amountNum * 1e6 > maxSellable;
-  const rawAmount = mode === "buy" ? amountNum : amountNum * 1e6;
+  const sellExceeds = mode === "sell" && amountNum * ONE > maxSellable;
+  // Raw base units. Collateral, YES and NO all share `decimals`, so this holds
+  // for buy (collateral in) and sell (YES/NO in) alike.
+  const rawAmount = Math.floor(amountNum * ONE);
 
   const { data: quote, isLoading: quoteLoading } = useSwapQuote(
     market.publicKey,
@@ -66,6 +76,7 @@ export function TradePanel({
     mode,
     sellExceeds ? 0 : rawAmount,
     { reserveYes: market.reserveYes, reserveNo: market.reserveNo, lEff: market.lEff },
+    market.collateralMint,
   );
 
   const minOutput = quote?.output ? Math.floor(quote.output * (1 - SLIPPAGE_BPS / 10000)) : 0;
@@ -75,9 +86,10 @@ export function TradePanel({
     setLoading(true);
     try {
       const marketPda = new PublicKey(market.publicKey);
+      const collatMint = new PublicKey(market.collateralMint);
       const yesMintPda = client.yesMint(marketPda);
       const noMintPda = client.noMint(marketPda);
-      const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+      const userCollateral = await getAssociatedTokenAddress(collatMint, publicKey);
       const userYes = await getAssociatedTokenAddress(yesMintPda, publicKey);
       const userNo = await getAssociatedTokenAddress(noMintPda, publicKey);
 
@@ -90,7 +102,7 @@ export function TradePanel({
       for (const [ata, mint] of [
         [userYes, yesMintPda],
         [userNo, noMintPda],
-        [userUsdc, USDC_MINT],
+        [userCollateral, collatMint],
       ] as [PublicKey, PublicKey][]) {
         try {
           await getAccount(conn, ata);
@@ -100,29 +112,29 @@ export function TradePanel({
         }
       }
 
-      // Fee-recipient USDC ATAs (2% swap fee → 50% DAO, 50% creator). The DAO
-      // key is off-curve. The creator ATA is only needed when the trader is NOT
-      // the creator (else creatorUsdc is null on-chain and they keep their half).
+      // Fee-recipient ATAs (2% swap fee → 50% DAO, 50% creator) in the market's
+      // collateral. The DAO key is off-curve. The creator ATA is only needed when
+      // the trader is NOT the creator (else creatorUsdc is null on-chain).
       const creatorAuthority = new PublicKey(market.authority);
-      const daoUsdcAta = await getAssociatedTokenAddress(USDC_MINT, PROTOCOL_DAO, true);
+      const daoAta = await getAssociatedTokenAddress(collatMint, PROTOCOL_DAO, true);
       try {
-        await getAccount(conn, daoUsdcAta);
+        await getAccount(conn, daoAta);
       } catch {
         preIxs.push(
-          createAssociatedTokenAccountInstruction(publicKey, daoUsdcAta, PROTOCOL_DAO, USDC_MINT),
+          createAssociatedTokenAccountInstruction(publicKey, daoAta, PROTOCOL_DAO, collatMint),
         );
       }
       if (!creatorAuthority.equals(publicKey)) {
-        const creatorUsdcAta = await getAssociatedTokenAddress(USDC_MINT, creatorAuthority, true);
+        const creatorAta = await getAssociatedTokenAddress(collatMint, creatorAuthority, true);
         try {
-          await getAccount(conn, creatorUsdcAta);
+          await getAccount(conn, creatorAta);
         } catch {
           preIxs.push(
             createAssociatedTokenAccountInstruction(
               publicKey,
-              creatorUsdcAta,
+              creatorAta,
               creatorAuthority,
-              USDC_MINT,
+              collatMint,
             ),
           );
         }
@@ -136,7 +148,7 @@ export function TradePanel({
           : side === "yes"
             ? "yesToUsdc"
             : "noToUsdc";
-      const lamports = Math.floor(amountNum * 1e6);
+      const lamports = Math.floor(amountNum * ONE);
 
       // Close ATAs that remain empty after swap (cleanup wallet, recover rent)
       // Buy YES → NO ATA empty; Buy NO → YES ATA empty
@@ -157,6 +169,7 @@ export function TradePanel({
         amountIn: lamports,
         minOutput,
         creatorAuthority,
+        collateralMint: collatMint,
       });
       const tx = await client.sendIxs([...preIxs, swapIx, ...postIxs]);
 
@@ -178,8 +191,8 @@ export function TradePanel({
 
       const desc =
         mode === "buy"
-          ? `${formatUsdc(quote.output)} ${side.toUpperCase()} for ${amountNum.toFixed(2)} USDC`
-          : `${amountNum.toFixed(2)} ${side.toUpperCase()} for ${formatUsdc(quote.output)} USDC`;
+          ? `${formatAmount(quote.output, decimals)} ${side.toUpperCase()} for ${amountNum} ${symbol}`
+          : `${amountNum} ${side.toUpperCase()} for ${formatAmount(quote.output, decimals)} ${symbol}`;
       toast.success(`${mode === "buy" ? "Bought" : "Sold"} ${side.toUpperCase()}`, {
         description: desc,
         action: { label: "Solscan ↗", onClick: () => window.open(solscanTxUrl(tx), "_blank") },
@@ -202,9 +215,10 @@ export function TradePanel({
     }
   };
 
-  const outputDisplay = quote?.output ? formatUsdc(quote.output) : "—";
-  const inputUnit = mode === "buy" ? "USDC" : side.toUpperCase();
-  const outputUnit = mode === "buy" ? side.toUpperCase() : "USDC";
+  const outputDisplay = quote?.output ? formatAmount(quote.output, decimals) : "—";
+  // Buy: pay collateral, receive YES/NO. Sell: pay YES/NO, receive collateral.
+  const inputUnit = mode === "buy" ? symbol : side.toUpperCase();
+  const outputUnit = mode === "buy" ? side.toUpperCase() : symbol;
 
   return (
     <div className="border border-line p-[16px] space-y-[12px]">
@@ -273,9 +287,9 @@ export function TradePanel({
         <button
           type="button"
           className="text-[11px] text-accent hover:text-text-hi font-mono transition-all duration-[120ms]"
-          onClick={() => setAmount((maxSellable / 1e6).toString())}
+          onClick={() => setAmount((maxSellable / ONE).toString())}
         >
-          Max: {formatUsdc(maxSellable)} {side.toUpperCase()}
+          Max: {formatAmount(maxSellable, decimals)} {side.toUpperCase()}
         </button>
       )}
 
@@ -300,8 +314,8 @@ export function TradePanel({
               {(() => {
                 const avgP =
                   mode === "buy"
-                    ? (amountNum * 1e6) / quote.output
-                    : quote.output / (amountNum * 1e6);
+                    ? (amountNum * ONE) / quote.output
+                    : quote.output / (amountNum * ONE);
                 const fairP =
                   mode === "buy"
                     ? side === "yes"
@@ -313,9 +327,9 @@ export function TradePanel({
                 const slippage = fairP > 0 ? (Math.abs(avgP - fairP) / fairP) * 100 : 0;
 
                 // Potential profit if this side wins.
-                const cost = amountNum * 1e6; // USDC paid
+                const cost = amountNum * ONE; // collateral paid
                 const tokensReceived = quote.output; // tokens you get
-                // If YES wins: each YES = 1 USDC. Profit = tokens - cost.
+                // If this side wins: each winning token = 1 collateral. Profit = tokens - cost.
                 const potentialProfit = mode === "buy" ? tokensReceived - cost : 0;
                 const profitPct = cost > 0 && mode === "buy" ? (potentialProfit / cost) * 100 : 0;
 
@@ -324,14 +338,15 @@ export function TradePanel({
                     <MetaRow label="You receive" value={`${outputDisplay} ${outputUnit}`} />
                     <MetaRow
                       label="Avg price"
-                      value={`${avgP.toFixed(4)} USDC/${side.toUpperCase()}`}
+                      value={`${avgP.toFixed(4)} ${symbol}/${side.toUpperCase()}`}
                     />
                     {mode === "buy" && tokensReceived > 0 && (
                       <MetaRow
                         label={`If ${side.toUpperCase()} wins`}
                         value={
                           <span className="text-yes">
-                            ${formatUsdc(tokensReceived)} (+{profitPct.toFixed(0)}%)
+                            {formatAmount(tokensReceived, decimals, { symbol })} (+
+                            {profitPct.toFixed(0)}%)
                           </span>
                         }
                       />
@@ -345,7 +360,7 @@ export function TradePanel({
                     )}
                     <MetaRow
                       label="Min output (1%)"
-                      value={`${formatUsdc(minOutput)} ${outputUnit}`}
+                      value={`${formatAmount(minOutput, decimals)} ${outputUnit}`}
                       last
                     />
                   </>

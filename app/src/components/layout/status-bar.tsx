@@ -6,7 +6,8 @@ import Link from "next/link";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Wordmark } from "@/components/ui/wordmark";
 import { useMarkets } from "@/hooks/use-markets";
-import { formatUsdc, poolValue } from "@pm-amm/sdk/math";
+import { poolValue } from "@pm-amm/sdk/math";
+import { findToken } from "@/lib/tokens";
 import { CLUSTER, IS_MAINNET } from "@/lib/constants";
 import { toast } from "sonner";
 
@@ -56,10 +57,13 @@ export function StatusBar() {
   const activeCount = markets?.filter((m) => !m.resolved).length ?? 0;
   const totalCount = markets?.length ?? 0;
 
+  // Pool value per market normalized to human units by each token's decimals
+  // (markets can use different collateral). Cross-token sum → a rough proxy.
   const totalTvl =
     markets?.reduce((sum, m) => {
       if (m.lEff <= 0) return sum;
-      return sum + poolValue(m.price, m.lEff);
+      const d = findToken(m.collateralMint)?.decimals ?? 6;
+      return sum + poolValue(m.price, m.lEff) / 10 ** d;
     }, 0) ?? 0;
 
   return (
@@ -88,7 +92,10 @@ export function StatusBar() {
 
       <div className="hidden md:flex gap-[24px] justify-center">
         <Stat label="NET" value={CLUSTER.toUpperCase()} />
-        <Stat label="TVL" value={`$${formatUsdc(totalTvl)}`} />
+        <Stat
+          label="TVL"
+          value={`$${totalTvl.toLocaleString("en-US", { maximumFractionDigits: 0 })}`}
+        />
         <Stat label="MKTS" value={String(totalCount)} />
         <Stat label="" value={`${activeCount} active`} />
       </div>

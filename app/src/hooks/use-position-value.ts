@@ -40,11 +40,14 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
       try {
         const market = new PublicKey(marketPda);
         const client = getClient(connection);
+        // Per-market collateral (any SPL token) — resolve from the account.
+        const m = await client.fetchMarket(market);
+        const collatMint = m ? (m.collateralMint as PublicKey) : USDC_MINT;
 
         const yesMint = client.yesMint(market);
         const noMint = client.noMint(market);
 
-        const userUsdc = await getAssociatedTokenAddress(USDC_MINT, publicKey);
+        const userUsdc = await getAssociatedTokenAddress(collatMint, publicKey);
         const userYes = await getAssociatedTokenAddress(yesMint, publicKey);
         const userNo = await getAssociatedTokenAddress(noMint, publicKey);
 
@@ -52,7 +55,7 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
         const { createAssociatedTokenAccountInstruction } = await import("@solana/spl-token");
         const ataIxs: TransactionInstruction[] = [];
         const atas = [
-          { ata: userUsdc, mint: USDC_MINT },
+          { ata: userUsdc, mint: collatMint },
           { ata: userYes, mint: yesMint },
           { ata: userNo, mint: noMint },
         ];
@@ -65,10 +68,10 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
         // DAO fee ATA (off-curve) — required by `swap`; include if missing so the
         // sell sim doesn't fail. The 2% fee is reflected in the simulated payout,
         // so the value is the true realizable USDC.
-        const daoUsdc = await getAssociatedTokenAddress(USDC_MINT, PROTOCOL_DAO, true);
+        const daoUsdc = await getAssociatedTokenAddress(collatMint, PROTOCOL_DAO, true);
         if (!(await connection.getAccountInfo(daoUsdc))) {
           ataIxs.push(
-            createAssociatedTokenAccountInstruction(publicKey, daoUsdc, PROTOCOL_DAO, USDC_MINT),
+            createAssociatedTokenAccountInstruction(publicKey, daoUsdc, PROTOCOL_DAO, collatMint),
           );
         }
 
@@ -86,6 +89,7 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
             market,
             ataIxs,
             userUsdc,
+            collatMint,
           );
         }
 
@@ -100,6 +104,7 @@ export function usePositionValue(marketPda: string | undefined, tokens: UserToke
             market,
             ataIxs,
             userUsdc,
+            collatMint,
           );
         }
 
@@ -134,6 +139,7 @@ async function simulateSell(
   market: PublicKey,
   ataIxs: TransactionInstruction[],
   outputAta: PublicKey,
+  collateralMint: PublicKey,
 ): Promise<number> {
   // Get pre-balance of USDC ATA
   let preBal = 0;
@@ -154,6 +160,7 @@ async function simulateSell(
     amountIn: amount,
     minOutput: 0,
     creatorAuthority: publicKey, // value with creatorUsdc=null (payout is identical)
+    collateralMint,
   });
 
   const tx = new Transaction().add(
