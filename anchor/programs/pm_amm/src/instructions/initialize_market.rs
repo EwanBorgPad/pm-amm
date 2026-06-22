@@ -32,14 +32,15 @@ pub struct InitializeMarket<'info> {
     )]
     pub market: Box<Account<'info, Market>>,
 
-    /// The collateral mint (USDC or mock). Must have 6 decimals.
-    #[account(constraint = collateral_mint.decimals == 6 @ PmAmmError::InvalidBudget)]
+    /// The collateral mint — ANY SPL mint. The YES/NO mints below are created
+    /// with the SAME decimals, so "1 collateral unit = 1 winning token" holds
+    /// and the reserves/solvency math stays scale-invariant.
     pub collateral_mint: Box<Account<'info, Mint>>,
 
     #[account(
         init,
         payer = authority,
-        mint::decimals = 6,
+        mint::decimals = collateral_mint.decimals,
         mint::authority = market,
         seeds = [YES_MINT_SEED, market.key().as_ref()],
         bump,
@@ -49,7 +50,7 @@ pub struct InitializeMarket<'info> {
     #[account(
         init,
         payer = authority,
-        mint::decimals = 6,
+        mint::decimals = collateral_mint.decimals,
         mint::authority = market,
         seeds = [NO_MINT_SEED, market.key().as_ref()],
         bump,

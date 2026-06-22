@@ -67,7 +67,7 @@ pub struct LaunchVaultMarket<'info> {
     #[account(
         init,
         payer = payer,
-        mint::decimals = 6,
+        mint::decimals = collateral_mint.decimals,
         mint::authority = market,
         seeds = [YES_MINT_SEED, market.key().as_ref()],
         bump,
@@ -77,7 +77,7 @@ pub struct LaunchVaultMarket<'info> {
     #[account(
         init,
         payer = payer,
-        mint::decimals = 6,
+        mint::decimals = collateral_mint.decimals,
         mint::authority = market,
         seeds = [NO_MINT_SEED, market.key().as_ref()],
         bump,
