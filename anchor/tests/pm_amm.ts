@@ -2,7 +2,14 @@ import * as anchor from "@anchor-lang/core";
 import { Program } from "@anchor-lang/core";
 import { PmAmm } from "../target/types/pm_amm";
 import { PublicKey, SystemProgram, ComputeBudgetProgram, Keypair } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, createMint, createAccount, mintTo, getAccount } from "@solana/spl-token";
+import {
+  TOKEN_PROGRAM_ID,
+  createMint,
+  createAccount,
+  mintTo,
+  getAccount,
+  getMint,
+} from "@solana/spl-token";
 import { assert } from "chai";
 
 const YES_MINT_SEED = Buffer.from("yes_mint");
@@ -286,6 +293,102 @@ describe("pm_amm", () => {
     assert.ok(
       Number((await getAccount(provider.connection, traderYes)).amount) > 0,
       "trader received YES",
+    );
+  });
+
+  // ================================================================
+  // Arbitrary-decimals collateral: a 9-decimal token market works end-to-end.
+  // Proves the scale-invariance — YES/NO inherit the collateral's decimals, so
+  // every 1:1 relationship + the solvency guard hold at any scale.
+  // ================================================================
+  it("supports a non-6-decimal collateral (9 decimals)", async () => {
+    const D = 9;
+    const ONE = 10 ** D; // 1 token in raw units (1e9)
+    const mint9 = await createMint(provider.connection, payer, authority, null, D);
+    const user9 = await createAccount(provider.connection, payer, mint9, authority);
+    await mintTo(provider.connection, payer, mint9, user9, payer, 10_000 * ONE);
+    const dao9 = await createAccount(
+      provider.connection,
+      payer,
+      mint9,
+      PROTOCOL_DAO,
+      Keypair.generate(),
+    );
+
+    const mid = new anchor.BN(Math.floor(Math.random() * 1_000_000_000) + 5_000_000_000);
+    const p = deriveMarketPdas(mid, program.programId);
+    const now = Math.floor(Date.now() / 1000);
+
+    await program.methods
+      .initializeMarket(mid, new anchor.BN(now + 86400 * 7), "9-decimal market", 0)
+      .accountsPartial({
+        authority,
+        market: p.marketPda,
+        collateralMint: mint9,
+        yesMint: p.yesMint,
+        noMint: p.noMint,
+        vault: p.vault,
+        yesMetadata: p.yesMetadata,
+        noMetadata: p.noMetadata,
+        tokenMetadataProgram: METAPLEX_PROGRAM_ID,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+      })
+      .rpc();
+
+    // YES/NO mints inherited the collateral's 9 decimals.
+    assert.equal((await getMint(provider.connection, p.yesMint)).decimals, D, "YES decimals");
+    assert.equal((await getMint(provider.connection, p.noMint)).decimals, D, "NO decimals");
+
+    const user9Yes = await createAccount(provider.connection, payer, p.yesMint, authority);
+    const user9No = await createAccount(provider.connection, payer, p.noMint, authority);
+    const lp = deriveLpPda(p.marketPda, authority, program.programId);
+
+    await program.methods
+      .depositLiquidity(new anchor.BN(1000 * ONE)) // 1000 tokens
+      .accountsPartial({
+        signer: authority,
+        market: p.marketPda,
+        collateralMint: mint9,
+        vault: p.vault,
+        userCollateral: user9,
+        lpPosition: lp,
+        systemProgram: SystemProgram.programId,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
+      .rpc();
+
+    await program.methods
+      .swap({ usdcToYes: {} } as any, new anchor.BN(100 * ONE), new anchor.BN(0)) // buy with 100 tokens
+      .accountsPartial({
+        signer: authority,
+        market: p.marketPda,
+        collateralMint: mint9,
+        yesMint: p.yesMint,
+        noMint: p.noMint,
+        vault: p.vault,
+        userCollateral: user9,
+        userYes: user9Yes,
+        userNo: user9No,
+        daoUsdc: dao9,
+        creatorUsdc: null, // swapper IS the creator → keeps their half
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 })])
+      .rpc();
+
+    // The swap succeeding already means the on-chain solvency guard passed at 9dp.
+    assert.ok(
+      Number((await getAccount(provider.connection, user9Yes)).amount) > 0,
+      "received YES in a 9-decimal market",
+    );
+    // 2% fee on 100 tokens = 2 tokens; DAO gets half = 1 token (1e9 raw) in the 9dp token.
+    assert.equal(
+      Number((await getAccount(provider.connection, dao9)).amount),
+      Math.floor((100 * ONE * 200) / 10_000 / 2),
+      "DAO fee paid in the 9-decimal collateral",
     );
   });
 

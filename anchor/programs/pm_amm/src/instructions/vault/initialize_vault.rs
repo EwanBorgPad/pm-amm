@@ -30,8 +30,7 @@ pub struct InitializeVault<'info> {
     )]
     pub vault: Box<Account<'info, CommitmentVault>>,
 
-    /// USDC (or mock) mint. Must be 6 decimals.
-    #[account(constraint = collateral_mint.decimals == 6 @ PmAmmError::InvalidBudget)]
+    /// Collateral mint — any SPL mint. YES/NO mints inherit its decimals at launch.
     pub collateral_mint: Box<Account<'info, Mint>>,
 
     /// PDA-owned token account that aggregates all commits.
