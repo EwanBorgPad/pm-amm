@@ -17,6 +17,8 @@ export interface MarketData {
   publicKey: string;
   marketId: number;
   authority: string;
+  /** Collateral mint (any SPL token — not necessarily USDC). */
+  collateralMint: string;
   name: string;
   startTs: number;
   endTs: number;
@@ -117,6 +119,7 @@ export function useMarkets() {
           publicKey: acc.publicKey.toBase58(),
           marketId,
           authority: m.authority.toBase58(),
+          collateralMint: m.collateralMint.toBase58(),
           name: nameStr || `Market #${marketId}`,
           startTs: bnToNum(m.startTs),
           endTs,
