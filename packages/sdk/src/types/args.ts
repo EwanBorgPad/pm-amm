@@ -2,6 +2,7 @@
  * Argument types for instruction builders / send helpers, plus converters from
  * friendly string unions to the Anchor enum object form (`{ yes: {} }`).
  */
+import type { PublicKey } from "@solana/web3.js";
 
 /** A binary market side. */
 export type Side = "yes" | "no";
@@ -36,8 +37,10 @@ export interface CreateMarketInput {
   durationSecs: number;
   /** YES seed price in bps [100, 9900]; omit / 0 = legacy 50/50. */
   initialPriceBps?: number;
-  /** Optional first liquidity deposit (USDC, human units) bundled in the same tx. */
+  /** Optional first liquidity deposit (collateral, human units) bundled in the same tx. */
   depositUsdc?: number;
+  /** Collateral mint for the market (any SPL token). Defaults to the client's collateral. */
+  collateralMint?: PublicKey;
 }
 
 export interface CreateVaultInput {

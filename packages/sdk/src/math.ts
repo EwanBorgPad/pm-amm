@@ -92,6 +92,34 @@ export function formatUsdc(lamports: number | bigint): string {
   return val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/**
+ * Decimal-aware amount formatter for ANY collateral token. `decimals` is the
+ * mint's decimals (6 = USDC, 9 = wSOL, …); optionally append a `symbol`.
+ */
+export function formatAmount(
+  raw: number | bigint,
+  decimals: number,
+  opts?: { symbol?: string; maxFractionDigits?: number },
+): string {
+  const val = Number(raw) / 10 ** decimals;
+  const maxFrac = opts?.maxFractionDigits ?? Math.min(decimals, 6);
+  const s = val.toLocaleString("en-US", {
+    minimumFractionDigits: Math.min(2, maxFrac),
+    maximumFractionDigits: maxFrac,
+  });
+  return opts?.symbol ? `${s} ${opts.symbol}` : s;
+}
+
+/** Human → raw base units for a mint with `decimals` (1.5 @ 6dp -> 1_500_000). */
+export function toRaw(human: number, decimals: number): number {
+  return Math.floor(human * 10 ** decimals);
+}
+
+/** Raw base units → human number for a mint with `decimals`. */
+export function fromRaw(raw: number | bigint, decimals: number): number {
+  return Number(raw) / 10 ** decimals;
+}
+
 /** Format price as percentage */
 export function formatPrice(price: number): string {
   return `${(price * 100).toFixed(1)}%`;

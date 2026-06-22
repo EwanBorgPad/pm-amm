@@ -2,13 +2,16 @@
  * `send.*` — convenience wrappers that build an instruction, prepend a
  * compute-budget preinstruction (+ any missing ATA creates), and send+confirm
  * via the bound provider. Mirrors the semantics of the app's former `run*`
- * helpers. USDC-denominated amounts are in HUMAN units (converted to 6dp here);
- * `swap` amounts are RAW micro-units (the caller computes slippage).
+ * helpers. For binary markets, human amounts are converted to the MARKET's
+ * collateral decimals (any SPL token); `swap`/`redeemPair` amounts are RAW base
+ * units. Vault flows are still USDC (6dp) pending the vault-collateral phase.
  */
 import type { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import type { BN } from "@anchor-lang/core";
+import { getMint } from "@solana/spl-token";
 import type { PmAmmClient } from "./client";
 import { CU, PROTOCOL_DAO } from "./constants";
+import { toRaw } from "./math";
 import { randomU48 } from "./encoding";
 import { ensureAtaIx, computeBudgetIx } from "./util/ata";
 import type {
@@ -35,6 +38,14 @@ export function makeSend(client: PmAmmClient) {
     return out;
   }
 
+  /** A binary market's collateral mint + its decimals (any SPL token). */
+  async function collateralOf(market: PublicKey): Promise<{ mint: PublicKey; decimals: number }> {
+    const m = await client.fetchMarket(market);
+    if (!m) throw new Error("market not found");
+    const mint = m.collateralMint as PublicKey;
+    return { mint, decimals: (await getMint(client.connection, mint)).decimals };
+  }
+
   return {
     // ---- binary market ----
     async createMarket(input: CreateMarketInput) {
@@ -42,6 +53,7 @@ export function makeSend(client: PmAmmClient) {
       const marketId = randomU48();
       const market = client.marketPda(marketId);
       const endTs = Math.floor(Date.now() / 1000) + input.durationSecs;
+      const collateralMint = input.collateralMint ?? client.collateralMint;
       const ixs: TransactionInstruction[] = [computeBudgetIx(CU.HEAVY)];
       ixs.push(
         await client.ix.initializeMarket({
@@ -50,15 +62,18 @@ export function makeSend(client: PmAmmClient) {
           endTs,
           name: input.name,
           initialPriceBps: input.initialPriceBps ?? 0,
+          collateralMint,
         }),
       );
       if (input.depositUsdc && input.depositUsdc > 0) {
-        ixs.push(...(await ataPreIxs([client.collateralMint])));
+        const decimals = (await getMint(client.connection, collateralMint)).decimals;
+        ixs.push(...(await ataPreIxs([collateralMint])));
         ixs.push(
           await client.ix.depositLiquidity({
             signer: authority,
             market,
-            amount: usdc(input.depositUsdc),
+            amount: toRaw(input.depositUsdc, decimals),
+            collateralMint,
           }),
         );
       }
@@ -76,18 +91,15 @@ export function makeSend(client: PmAmmClient) {
       const m = await client.fetchMarket(market);
       if (!m) throw new Error("swap: market not found");
       const authority = m.authority as PublicKey;
-      const pre = await ataPreIxs([
-        client.yesMint(market),
-        client.noMint(market),
-        client.collateralMint,
-      ]);
-      // Ensure the fee-recipient USDC ATAs exist (2% fee → 50% DAO, 50%
-      // creator). Idempotent; payer is the swapper. The DAO key is off-curve.
+      const collateralMint = m.collateralMint as PublicKey;
+      const pre = await ataPreIxs([client.yesMint(market), client.noMint(market), collateralMint]);
+      // Ensure the fee-recipient ATAs exist (2% fee → 50% DAO, 50% creator), in
+      // the MARKET's collateral. Idempotent; payer is the swapper. DAO is off-curve.
       const { ix: daoAta } = await ensureAtaIx(
         client.connection,
         signer,
         PROTOCOL_DAO,
-        client.collateralMint,
+        collateralMint,
         true,
       );
       if (daoAta) pre.push(daoAta);
@@ -98,7 +110,7 @@ export function makeSend(client: PmAmmClient) {
           client.connection,
           signer,
           authority,
-          client.collateralMint,
+          collateralMint,
         );
         if (creatorAta) pre.push(creatorAta);
       }
@@ -109,43 +121,55 @@ export function makeSend(client: PmAmmClient) {
         amountIn: amountInMicro,
         minOutput: minOutputMicro,
         creatorAuthority: authority,
+        collateralMint,
       });
       return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },
 
     async depositLiquidity(market: PublicKey, amountUsdc: number) {
       const signer = client.walletPubkey();
-      const pre = await ataPreIxs([client.collateralMint]);
-      const ix = await client.ix.depositLiquidity({ signer, market, amount: usdc(amountUsdc) });
+      const { mint, decimals } = await collateralOf(market);
+      const pre = await ataPreIxs([mint]);
+      const ix = await client.ix.depositLiquidity({
+        signer,
+        market,
+        amount: toRaw(amountUsdc, decimals),
+        collateralMint: mint,
+      });
       return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },
 
     async withdrawLiquidity(market: PublicKey, sharesToBurn: BN | number) {
       const signer = client.walletPubkey();
+      const { mint } = await collateralOf(market);
       const pre = await ataPreIxs([client.yesMint(market), client.noMint(market)]);
-      const ix = await client.ix.withdrawLiquidity({ signer, market, sharesToBurn });
+      const ix = await client.ix.withdrawLiquidity({
+        signer,
+        market,
+        sharesToBurn,
+        collateralMint: mint,
+      });
       return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },
 
     async redeemPair(market: PublicKey, amountMicro: number | BN) {
       const signer = client.walletPubkey();
-      const pre = await ataPreIxs([
-        client.yesMint(market),
-        client.noMint(market),
-        client.collateralMint,
-      ]);
-      const ix = await client.ix.redeemPair({ signer, market, amount: amountMicro });
+      const { mint } = await collateralOf(market);
+      const pre = await ataPreIxs([client.yesMint(market), client.noMint(market), mint]);
+      const ix = await client.ix.redeemPair({
+        signer,
+        market,
+        amount: amountMicro,
+        collateralMint: mint,
+      });
       return client.sendIxs([computeBudgetIx(CU.DEFAULT), ...pre, ix]);
     },
 
     async claimWinnings(market: PublicKey) {
       const signer = client.walletPubkey();
-      const pre = await ataPreIxs([
-        client.yesMint(market),
-        client.noMint(market),
-        client.collateralMint,
-      ]);
-      const ix = await client.ix.claimWinnings({ signer, market });
+      const { mint } = await collateralOf(market);
+      const pre = await ataPreIxs([client.yesMint(market), client.noMint(market), mint]);
+      const ix = await client.ix.claimWinnings({ signer, market, collateralMint: mint });
       return client.sendIxs([computeBudgetIx(CU.HEAVY), ...pre, ix]);
     },
 
